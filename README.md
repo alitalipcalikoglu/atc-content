@@ -153,6 +153,8 @@ With `AUDIT_URL` and `AUDIT_API_KEY` set, every completed write request is forwa
 
 Structured request logs with request id and trace context, `/metrics` in Prometheus text (namespaces, keys, locales, missing and mismatched translations, latest release and publish time per namespace, bundle requests), `/v1/stats` for dashboards, and `/ready` that pings the database (cached 10 s). See [docs/READINESS.md](docs/READINESS.md).
 
+Audit forwarding is observable too: `audit_forward_enabled`, `audit_forward_events_total{result="recorded|sent|dropped|failed"}` and `audit_forward_pending`. A rising `dropped`, or a `pending` that does not drain, means audit events are being lost or delayed; alert on it.
+
 ## Backup / restore
 
 The only state to protect is the SQLite file at `DB_PATH` (default `./data/content.db`, plus its WAL sidecars while running). Take an online copy with `sqlite3 data/content.db "VACUUM INTO 'backup.db'"`. Restore by stopping the service, replacing the file and starting again. Before applying a pending migration to an existing database the service snapshots the file to `DB_PATH.pre-v<N>-<timestamp>-<pid>` (directory overridable with `DB_BACKUP_DIR`). Migrations are not reversible; to roll back, restore the pre-migration copy and run the previous version.

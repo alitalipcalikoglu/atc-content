@@ -8,6 +8,7 @@ import { Actor } from './actor.js';
 import { ApiKeyAuth } from './api-key-auth.js';
 import { Schemas } from './schemas.js';
 import { Views } from './views.js';
+import { AuditMetrics } from '../audit-metrics.js';
 
 /** @typedef {import('../config.js').Config} Config */
 /** @typedef {import('../domain/content-service.js').ContentService} ContentService */
@@ -249,6 +250,7 @@ export class ContentApi {
         '# HELP content_bundle_requests_total Bundle requests since start, per namespace and result.',
         '# TYPE content_bundle_requests_total counter',
         ...[...this.service.bundleRequests].flatMap(([ns, c]) => [`content_bundle_requests_total{namespace="${label(ns)}",result="ok"} ${c.ok}`, `content_bundle_requests_total{namespace="${label(ns)}",result="not_modified"} ${c.notModified}`]),
+        ...AuditMetrics.lines(this.audit),
         '# HELP content_process_uptime_seconds Process uptime.',
         '# TYPE content_process_uptime_seconds gauge',
         `content_process_uptime_seconds ${process.uptime().toFixed(0)}`,
