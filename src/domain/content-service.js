@@ -109,7 +109,7 @@ export class ContentService {
       missing,
       mismatched: this.content.mismatched(ns.name).length + this.content.orphans(ns.name).length,
       latest,
-      unpublishedChanges: latest === null ? true : ns.draft_updated_at > latest.created_at,
+      unpublishedChanges: ns.published_version === null || ns.published_version !== ns.draft_version,
     };
   }
 
@@ -120,7 +120,7 @@ export class ContentService {
    * @param {string} ns
    * @param {string} rawLocale
    * @param {{ fallback?: string|null }} input
-   * @returns {{ created: boolean }}
+   * @returns {{ created: boolean, locale: string }}
    */
   setLocale(ns, rawLocale, input, _actor = '') {
     const locale = Locales.canonical(rawLocale);
@@ -148,6 +148,11 @@ export class ContentService {
       this.content.deleteLocale(ns, locale);
       this.content.touch(ns, this.clock());
     });
+  }
+
+  /** Canonical tag of a locale configured in `ns`. @param {string} ns @param {string} raw */
+  localeOf(ns, raw) {
+    return this.#locale(ns, Locales.canonical(raw)).locale;
   }
 
   /** @param {string} ns @param {string} locale */
@@ -210,18 +215,21 @@ export class ContentService {
       if (!existing) {
         if (this.content.keyCount(ns) >= this.limits.maxKeysPerNamespace) throw new ContentError('LIMIT_EXCEEDED', `a namespace holds at most ${this.limits.maxKeysPerNamespace} keys`);
         this.content.insertKey(ns, key, input.description ?? '', now);
-      } else if (input.description !== undefined && input.description !== existing.description) {
+      }
+      let changed = !existing;
+      if (existing && input.description !== undefined && input.description !== existing.description) {
         this.content.updateKey(ns, key, input.description, now);
+        changed = true;
       }
       const configured = new Set(this.content.locales(ns).map((l) => l.locale));
       // The default goes first: other locales are checked against its new value.
       values.sort(([a], [b]) => Number(b === row.default_locale) - Number(a === row.default_locale));
       for (const [locale, value] of values) {
         if (!configured.has(locale)) throw new ContentError('LOCALE_NOT_FOUND', `locale "${locale}" is not configured in "${ns}"`);
-        if (value === null) this.#removeValue(row, key, locale);
-        else this.#check(this.#setValue(row, key, locale, value, actor, now));
+        if (value === null) changed = this.#removeValue(row, key, locale) || changed;
+        else changed = this.#check(this.#setValue(row, key, locale, value, actor, now)) !== 'unchanged' || changed;
       }
-      if (values.length || !existing) this.content.touch(ns, now);
+      if (changed) this.content.touch(ns, now);
       const def = this.content.translation(ns, key, row.default_locale);
       const mismatched = def ? this.content.translationsOfKey(ns, key).filter((t) => t.locale !== row.default_locale && t.placeholders !== def.placeholders).map((t) => t.locale) : [];
       return { created: !existing, mismatched };
@@ -263,9 +271,10 @@ export class ContentService {
     return current ? 'updated' : 'added';
   }
 
-  /** @param {SetResult} result */
+  /** @param {SetResult} result @returns {'added'|'updated'|'unchanged'} */
   #check(result) {
     if (typeof result === 'object') throw new ContentError(result.code, result.reason);
+    return result;
   }
 
   /** @param {NamespaceRow} ns @param {string} key @param {string} locale */
@@ -274,7 +283,7 @@ export class ContentService {
       const others = this.content.translationsOfKey(ns.name, key).filter((t) => t.locale !== locale);
       if (others.length) throw new ContentError('DEFAULT_REQUIRED', `remove the ${others.map((t) => t.locale).join(', ')} values before the ${locale} value`);
     }
-    this.content.deleteTranslation(ns.name, key, locale);
+    return this.content.deleteTranslation(ns.name, key, locale);
   }
 
   // ---- import / export
@@ -359,7 +368,9 @@ export class ContentService {
         ...this.content.orphans(ns).map((p) => ({ ...p, reason: `no ${row.default_locale} value` })),
       ];
       if (problems.length) throw new ContentError('UNPUBLISHABLE', `${problems.length} value(s) must be fixed before publishing`, { problems: problems.slice(0, ContentService.REPORT_MAX) });
-      return this.#release(ns, this.#draftContent(row), { note: input.note ?? '', rollbackOf: null }, actor);
+      const out = this.#release(ns, this.#draftContent(row), { note: input.note ?? '', rollbackOf: null }, actor);
+      this.content.markPublished(ns, row.draft_version);
+      return out;
     });
   }
 
@@ -377,6 +388,7 @@ export class ContentService {
       if (!content) throw new ContentError('RELEASE_NOT_FOUND', `release ${input.release} of "${ns}" does not exist`);
       const out = this.#release(ns, content, { note: input.note ?? `rollback to release ${input.release}`, rollbackOf: input.release }, actor);
       if (input.restoreDraft) this.#restoreDraft(ns, content, actor, out.created_at);
+      this.content.markPublished(ns, input.restoreDraft ? this.namespace(ns).draft_version : null);
       return out;
     });
   }

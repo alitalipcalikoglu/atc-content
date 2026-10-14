@@ -2,6 +2,7 @@ import { readServiceVersion } from '@atc-web/atc-service-core/fastify';
 import { Config } from '../src/config.js';
 import { Database } from '../src/db.js';
 import { ContentService } from '../src/domain/content-service.js';
+import { ContentApi } from '../src/http/content-api.js';
 import { ContentStore } from '../src/store/content-store.js';
 import { ReleaseStore } from '../src/store/release-store.js';
 
@@ -50,4 +51,11 @@ export function bearer(key) {
 export function tickingClock(start = 1_700_000_000_000) {
   let t = start;
   return () => (t += 1_000);
+}
+/** Fully wired Fastify app. @param {Record<string, string>} [overrides] @param {object} [deps] Extra constructor deps, e.g. an AuditClient. */
+export async function buildApp(overrides, deps = {}) {
+  const t = testService(overrides);
+  const app = await new ContentApi({ ...t, version: readServiceVersion(import.meta.url), ...deps }).build();
+  await app.ready();
+  return { app, ...t };
 }

@@ -1,0 +1,857 @@
+openapi: 3.1.0
+info:
+  title: atc-content
+  version: "1.0.0"
+  description: >
+    Translations and content strings for applications: namespaces (`web`, `mobile`), BCP 47
+    locales with one default locale and fallback chains (`tr-CY -> tr -> en`), keys with
+    per-locale values and `{name}` placeholders checked against the default locale, a draft that
+    is published as immutable numbered releases (with rollback), and fallback-resolved bundles
+    with a strong `ETag` for applications.
+
+
+    Auth: every `/v1/*` and `/metrics` route requires `Authorization: Bearer <api-key>` with a
+    `read`, `write` or `readwrite` role (see `ApiKeyAuth`). Exception: `GET /v1/bundles/{ns}/{locale}`
+    also accepts requests without an `Authorization` header when `CONTENT_PUBLIC_BUNDLES=true`;
+    a presented key is still verified.
+
+
+    Locales in paths and bodies are case-insensitive and canonicalised (`tr-cy` becomes `tr-CY`).
+    Every response carries `Cache-Control: no-store` except bundles (`public, max-age=60`).
+servers:
+  - url: /
+security:
+  - ApiKeyAuth: []
+tags:
+  - name: namespaces
+  - name: locales
+  - name: keys
+  - name: transfer
+  - name: releases
+  - name: bundles
+  - name: stats
+  - name: ops
+paths:
+  /openapi.yaml:
+    get:
+      operationId: atc-content.openapi
+      summary: Download the canonical OpenAPI document
+      description: Returns this service's repository-root OpenAPI 3.1 document byte-for-byte.
+      security: []
+      responses:
+        "200":
+          description: Canonical OpenAPI document.
+          content:
+            text/yaml:
+              schema: { type: string }
+
+  /health:
+    get:
+      operationId: atc-content.health.get
+      summary: Liveness probe
+      description: Always `200`. Does not check any dependency.
+      tags: [ops]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200":
+          description: Process is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /ready:
+    get:
+      operationId: atc-content.ready.get
+      summary: Readiness probe
+      description: Runs the database ping, cached for 10 seconds.
+      tags: [ops]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200":
+          description: Dependencies are healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+        "503":
+          description: The cached readiness check last failed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, error]
+                properties:
+                  status: { type: string, enum: [unavailable] }
+                  error: { type: string }
+
+  /v1/info:
+    get:
+      operationId: atc-content.info.get
+      summary: Service identity and capabilities
+      tags: [ops]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200":
+          description: Instance identity.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service, version, apiVersion, capabilities, schemaVersion, serviceCore]
+                properties:
+                  service: { type: string, const: atc-content }
+                  version: { type: string, description: "This service's own package.json semver." }
+                  apiVersion: { type: string, const: v1 }
+                  capabilities:
+                    type: array
+                    items: { type: string }
+                    description: "`locale-fallback`, `placeholder-check`, `releases`, `bundle-etag`, `import-export`, plus `public-bundles` when CONTENT_PUBLIC_BUNDLES=true."
+                  schemaVersion: { type: integer, description: "SQLite PRAGMA user_version of the open database." }
+                  serviceCore: { type: string, description: "@atc-web/atc-service-core version actually running." }
+
+  /metrics:
+    get:
+      operationId: atc-content.metrics.get
+      summary: Prometheus text-format metrics
+      description: Requires a `read`-capable API key. Not rate-limited.
+      tags: [ops]
+      x-stack-visibility: operational
+      responses:
+        "200":
+          description: >
+            `content_namespaces`, `content_keys{namespace}`, `content_locales{namespace}`,
+            `content_missing_translations{namespace,locale}`, `content_mismatched_translations{namespace}`,
+            `content_release{namespace}`, `content_last_publish_timestamp_seconds{namespace}`,
+            `content_bundle_requests_total{namespace,result}` (process-local), `content_process_uptime_seconds`.
+          content:
+            text/plain:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/namespaces:
+    get:
+      operationId: atc-content.namespaces.list
+      summary: List namespaces with counts
+      tags: [namespaces]
+      responses:
+        "200":
+          description: Every namespace, ordered by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Namespace" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      operationId: atc-content.namespaces.create
+      summary: Create a namespace
+      description: >
+        Creates the namespace with its default locale and, optionally, more locales. A `fallback`
+        may name a locale listed later in the same request. The default locale has no fallback.
+      tags: [namespaces]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, defaultLocale]
+              properties:
+                name: { $ref: "#/components/schemas/NamespaceName" }
+                defaultLocale: { $ref: "#/components/schemas/Locale" }
+                description: { type: string, maxLength: 500 }
+                locales:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [locale]
+                    properties:
+                      locale: { $ref: "#/components/schemas/Locale" }
+                      fallback: { anyOf: [{ $ref: "#/components/schemas/Locale" }, { type: "null" }] }
+      responses:
+        "201":
+          description: Created.
+          headers:
+            location: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [namespace]
+                properties:
+                  namespace: { $ref: "#/components/schemas/Namespace" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/namespaces/{ns}:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+    get:
+      operationId: atc-content.namespaces.get
+      summary: One namespace with locales, chains and counts
+      tags: [namespaces]
+      responses:
+        "200":
+          description: The namespace.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [namespace]
+                properties:
+                  namespace: { $ref: "#/components/schemas/Namespace" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: atc-content.namespaces.update
+      summary: Change description or default locale
+      description: >
+        `defaultLocale` must already be configured; it loses its own fallback. Values are checked
+        against the new default at the next publish.
+      tags: [namespaces]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                description: { type: string, maxLength: 500 }
+                defaultLocale: { $ref: "#/components/schemas/Locale" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [namespace]
+                properties:
+                  namespace: { $ref: "#/components/schemas/Namespace" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: atc-content.namespaces.delete
+      summary: Delete a namespace, its draft and every release
+      description: Irreversible. Bundles of this namespace return 404 afterwards.
+      tags: [namespaces]
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/namespaces/{ns}/locales/{locale}:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+      - $ref: "#/components/parameters/LocaleParam"
+    put:
+      operationId: atc-content.locales.upsert
+      summary: Add a locale or set its fallback
+      description: >
+        `fallback` must be another configured locale; cycles and a fallback on the default locale
+        are rejected (`INVALID_FALLBACK`). Every chain ends at the default locale.
+      tags: [locales]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                fallback: { anyOf: [{ $ref: "#/components/schemas/Locale" }, { type: "null" }] }
+      responses:
+        "200": { $ref: "#/components/responses/LocaleSet" }
+        "201": { $ref: "#/components/responses/LocaleSet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      operationId: atc-content.locales.delete
+      summary: Remove a locale and its draft values
+      description: Refused (`LOCALE_IN_USE`) for the default locale and for a locale another locale falls back to.
+      tags: [locales]
+      responses:
+        "204": { description: Removed. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/namespaces/{ns}/keys:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+    get:
+      operationId: atc-content.keys.list
+      summary: List draft keys with their values
+      tags: [keys]
+      parameters:
+        - { name: q, in: query, schema: { type: string, minLength: 1, maxLength: 120 }, description: Substring of key or description. }
+        - { name: missing, in: query, schema: { $ref: "#/components/schemas/Locale" }, description: Only keys without a value in this locale. }
+        - { name: limit, in: query, schema: { type: string, pattern: "^([1-9]|[1-9][0-9]|1[0-9][0-9]|200)$" }, description: Default 50, max 200. }
+        - { name: cursor, in: query, schema: { $ref: "#/components/schemas/Key" }, description: "`nextCursor` from the previous page." }
+      responses:
+        "200":
+          description: One page ordered by key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KeyEntry" } }
+                  nextCursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/namespaces/{ns}/keys/{key}:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+      - $ref: "#/components/parameters/KeyParam"
+    get:
+      operationId: atc-content.keys.get
+      summary: One key with every locale's value
+      tags: [keys]
+      responses:
+        "200":
+          description: The key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                properties:
+                  key: { $ref: "#/components/schemas/KeyEntry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: atc-content.keys.upsert
+      summary: Create or update a key
+      description: >
+        `values` is merged into the draft: a string sets that locale, `null` removes it. The
+        default locale's value is applied first; every other value must use exactly the same set
+        of `{name}` placeholders (`PLACEHOLDER_MISMATCH`) and needs a default value
+        (`DEFAULT_REQUIRED`). Changing the default's placeholders is allowed; locales that no
+        longer match are returned in `mismatched` and block publishing until fixed. The whole
+        request is applied or rejected as one.
+      tags: [keys]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                description: { type: string, maxLength: 500 }
+                values:
+                  type: object
+                  maxProperties: 500
+                  additionalProperties: { type: [string, "null"] }
+      responses:
+        "200": { $ref: "#/components/responses/KeySet" }
+        "201": { $ref: "#/components/responses/KeySet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      operationId: atc-content.keys.delete
+      summary: Delete a key from the draft
+      tags: [keys]
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/namespaces/{ns}/import:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+    post:
+      operationId: atc-content.translations.import
+      summary: Merge a flat or nested JSON object into one locale
+      description: >
+        Nested objects are flattened on `.`. Valid entries are applied, invalid ones reported
+        (first 100, with `invalidCount` as the total); nothing is deleted. Importing the default
+        locale creates missing keys; other locales only fill keys that already have a default value.
+      tags: [transfer]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [locale, strings]
+              properties:
+                locale: { $ref: "#/components/schemas/Locale" }
+                strings: { type: object }
+      responses:
+        "200":
+          description: Import report.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [locale, added, updated, unchanged, invalidCount, invalid]
+                properties:
+                  locale: { type: string }
+                  added: { type: integer }
+                  updated: { type: integer }
+                  unchanged: { type: integer }
+                  invalidCount: { type: integer }
+                  invalid:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key: { type: string }
+                        reason: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/namespaces/{ns}/export/{locale}:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+      - $ref: "#/components/parameters/LocaleParam"
+    get:
+      operationId: atc-content.translations.export
+      summary: One locale's own values as JSON
+      description: Values of that locale only, without fallback. `format=nested` returns `409 NESTED_CONFLICT` when a key is also a prefix of another key.
+      tags: [transfer]
+      parameters:
+        - { name: source, in: query, schema: { type: string, enum: [draft, published] }, description: Default `draft`. }
+        - { name: format, in: query, schema: { type: string, enum: [flat, nested] }, description: Default `flat`. }
+      responses:
+        "200":
+          description: Exported strings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [namespace, locale, source, release, strings]
+                properties:
+                  namespace: { type: string }
+                  locale: { type: string }
+                  source: { type: string, enum: [draft, published] }
+                  release: { type: [integer, "null"] }
+                  strings: { type: object }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/namespaces/{ns}/publish:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+    post:
+      operationId: atc-content.releases.publish
+      summary: Snapshot the draft as the next numbered release
+      description: >
+        Refused with `409 UNPUBLISHABLE` (and the offending `details.problems`) while any value's
+        placeholders differ from the default locale's or a value has no default-locale value.
+        Releases beyond `RELEASE_RETENTION` are pruned, oldest first; numbers are never reused.
+      tags: [releases]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                note: { type: string, maxLength: 500 }
+      responses:
+        "201": { $ref: "#/components/responses/ReleaseCreated" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/namespaces/{ns}/rollback:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+    post:
+      operationId: atc-content.releases.rollback
+      summary: Publish an earlier release's content as a new release
+      description: >
+        Creates release N+1 with the content of `release` (`rollbackOf` records which). The
+        draft is untouched unless `restoreDraft: true`, which replaces the draft with that
+        content and discards unpublished edits.
+      tags: [releases]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [release]
+              properties:
+                release: { type: integer, minimum: 1 }
+                note: { type: string, maxLength: 500 }
+                restoreDraft: { type: boolean }
+      responses:
+        "201": { $ref: "#/components/responses/ReleaseCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/namespaces/{ns}/releases:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+    get:
+      operationId: atc-content.releases.list
+      summary: Release history, newest first
+      tags: [releases]
+      parameters:
+        - { name: limit, in: query, schema: { type: string, pattern: "^([1-9]|[1-9][0-9]|100)$" }, description: Default 20, max 100. }
+        - { name: before, in: query, schema: { type: string, pattern: "^[0-9]{1,10}$" }, description: "`nextBefore` from the previous page." }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextBefore]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Release" } }
+                  nextBefore: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/namespaces/{ns}/releases/{number}:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+      - { name: number, in: path, required: true, schema: { type: string, pattern: "^[1-9][0-9]{0,9}$" } }
+    get:
+      operationId: atc-content.releases.get
+      summary: One release with its full content
+      tags: [releases]
+      responses:
+        "200":
+          description: The release.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [release]
+                properties:
+                  release:
+                    allOf:
+                      - $ref: "#/components/schemas/Release"
+                      - type: object
+                        properties:
+                          content: { $ref: "#/components/schemas/ReleaseContent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/bundles/{ns}/{locale}:
+    parameters:
+      - $ref: "#/components/parameters/NsParam"
+      - $ref: "#/components/parameters/LocaleParam"
+    get:
+      operationId: atc-content.bundles.get
+      summary: Published, fallback-resolved strings for an application
+      description: >
+        Each key takes the first value along `chain` (the locale, its fallbacks, then the default);
+        keys without any value are omitted. Strong `ETag`; send it back in `If-None-Match` for a
+        `304`. `Cache-Control: public, max-age=60`. Requires a `read`-capable key, or no
+        `Authorization` header at all when `CONTENT_PUBLIC_BUNDLES=true`.
+      tags: [bundles]
+      security:
+        - ApiKeyAuth: []
+        - {}
+      x-stack-visibility: public
+      parameters:
+        - { name: if-none-match, in: header, schema: { type: string } }
+      responses:
+        "200":
+          description: The bundle.
+          headers:
+            etag: { schema: { type: string } }
+            cache-control: { schema: { type: string, const: "public, max-age=60" } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [namespace, locale, chain, release, publishedAt, strings]
+                properties:
+                  namespace: { type: string }
+                  locale: { type: string }
+                  chain: { type: array, items: { type: string } }
+                  release: { type: integer }
+                  publishedAt: { type: string, format: date-time }
+                  strings: { type: object, additionalProperties: { type: string } }
+              example:
+                namespace: web
+                locale: tr-CY
+                chain: [tr-CY, tr, en]
+                release: 7
+                publishedAt: "2026-10-14T09:00:00.000Z"
+                strings: { "cart.items": "{count} ürün", "nav.home": "Ana sayfa" }
+        "304": { description: Not modified. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/stats:
+    get:
+      operationId: atc-content.stats.get
+      summary: Totals and one row per namespace
+      tags: [stats]
+      responses:
+        "200":
+          description: Summary for dashboards.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [namespaces, keys, locales, missing, mismatched, releases, lastPublish, items]
+                properties:
+                  namespaces: { type: integer }
+                  keys: { type: integer }
+                  locales: { type: integer }
+                  missing: { type: integer, description: "(key, locale) pairs without a draft value." }
+                  mismatched: { type: integer, description: Draft values that block publishing. }
+                  releases: { type: integer, description: Releases kept across namespaces. }
+                  lastPublish:
+                    type: [object, "null"]
+                    properties:
+                      namespace: { type: string }
+                      release: { type: integer }
+                      at: { type: string, format: date-time }
+                      by: { type: string }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        namespace: { type: string }
+                        defaultLocale: { type: string }
+                        keys: { type: integer }
+                        locales: { type: integer }
+                        missing: { type: integer }
+                        missingByLocale: { type: object, additionalProperties: { type: integer } }
+                        mismatched: { type: integer }
+                        release: { type: [integer, "null"] }
+                        publishedAt: { type: [string, "null"], format: date-time }
+                        publishedBy: { type: [string, "null"] }
+                        unpublishedChanges: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      description: >
+        `Authorization: Bearer <secret>`. Keys are configured as `id:secret[:role]` via
+        `CONTENT_API_KEYS`. `role` is `read`, `write`, or `readwrite` (default; satisfies both).
+
+  parameters:
+    NsParam:
+      name: ns
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/NamespaceName" }
+    LocaleParam:
+      name: locale
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Locale" }
+    KeyParam:
+      name: key
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Key" }
+
+  responses:
+    BadRequest:
+      description: "`VALIDATION_FAILED`, `INVALID_LOCALE`, `INVALID_FALLBACK`, `INVALID_VALUE`, `DEFAULT_REQUIRED` or `PLACEHOLDER_MISMATCH`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Unauthorized:
+      description: Missing or invalid API key.
+      headers:
+        www-authenticate: { schema: { type: string, const: Bearer } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+          example: { error: { code: UNAUTHORIZED, message: "missing or invalid API key" } }
+    Forbidden:
+      description: The key's role does not permit this operation (`FORBIDDEN`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+          example: { error: { code: FORBIDDEN, message: "this API key has no write access" } }
+    NotFound:
+      description: "`NAMESPACE_NOT_FOUND`, `LOCALE_NOT_FOUND`, `KEY_NOT_FOUND`, `RELEASE_NOT_FOUND` or `NOT_PUBLISHED`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Conflict:
+      description: "`NAMESPACE_EXISTS`, `LOCALE_IN_USE`, `NESTED_CONFLICT`, `UNPUBLISHABLE` or `LIMIT_EXCEEDED`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    RateLimited:
+      description: Per-key (or, for anonymous bundle requests, per-IP) rate limit exceeded (`RATE_LIMITED`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    LocaleSet:
+      description: Locale added (201) or updated (200).
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [created, locale, namespace]
+            properties:
+              created: { type: boolean }
+              locale: { type: string }
+              namespace: { $ref: "#/components/schemas/Namespace" }
+    KeySet:
+      description: Key created (201) or updated (200).
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [created, mismatched, key]
+            properties:
+              created: { type: boolean }
+              mismatched: { type: array, items: { type: string }, description: Locales whose placeholders no longer match the default. }
+              key: { $ref: "#/components/schemas/KeyEntry" }
+    ReleaseCreated:
+      description: Release created.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [release]
+            properties:
+              release: { $ref: "#/components/schemas/Release" }
+
+  schemas:
+    NamespaceName: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" }
+    Key: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,127}$" }
+    Locale:
+      type: string
+      minLength: 2
+      maxLength: 35
+      description: "BCP 47 language[-Script][-REGION], e.g. `en`, `tr-CY`, `zh-Hant-TW`, `es-419`. Case-insensitive on input."
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: {}
+    Namespace:
+      type: object
+      properties:
+        name: { type: string }
+        defaultLocale: { type: string }
+        description: { type: string }
+        locales:
+          type: array
+          items:
+            type: object
+            properties:
+              locale: { type: string }
+              fallback: { type: [string, "null"] }
+              chain: { type: array, items: { type: string } }
+        keys: { type: integer }
+        missing: { type: object, additionalProperties: { type: integer }, description: Keys without a draft value, per locale. }
+        mismatched: { type: integer }
+        release: { anyOf: [{ $ref: "#/components/schemas/Release" }, { type: "null" }] }
+        unpublishedChanges: { type: boolean }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        draftUpdatedAt: { type: string, format: date-time }
+    KeyEntry:
+      type: object
+      properties:
+        key: { type: string }
+        description: { type: string }
+        placeholders: { type: array, items: { type: string }, description: Placeholder names of the default-locale value. }
+        values: { type: object, additionalProperties: { type: string } }
+        mismatched: { type: array, items: { type: string } }
+        updatedBy: { type: object, additionalProperties: { type: string } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Release:
+      type: object
+      properties:
+        number: { type: integer }
+        note: { type: string }
+        rollbackOf: { type: [integer, "null"] }
+        keys: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    ReleaseContent:
+      type: object
+      properties:
+        defaultLocale: { type: string }
+        locales:
+          type: array
+          items:
+            type: object
+            properties:
+              locale: { type: string }
+              fallback: { type: [string, "null"] }
+        keys:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              description: { type: string }
+              values: { type: object, additionalProperties: { type: string } }

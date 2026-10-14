@@ -180,3 +180,21 @@ test('stats: keys, locales, missing, mismatched, last publish', () => {
   assert.equal(service.stats().namespaces, 1);
   assert.throws(() => service.bundle('web', 'en'), fails('NAMESPACE_NOT_FOUND'));
 });
+
+test('draft state: unpublished changes follow edits, publish and rollback', () => {
+  const { service } = seeded();
+  const unpublished = () => service.summary(service.namespace('web')).unpublishedChanges;
+  service.upsertKey('web', 'a', { values: { en: 'A' } }, 'x');
+  service.publish('web', {}, 'x');
+  assert.equal(unpublished(), false);
+  service.upsertKey('web', 'a', { values: { en: 'A' } }, 'x');
+  service.importLocale('web', 'en', { a: 'A' }, 'x');
+  assert.equal(unpublished(), false, 'writes that change nothing leave the draft clean');
+  service.upsertKey('web', 'a', { values: { en: 'B' } }, 'x');
+  assert.equal(unpublished(), true);
+  service.publish('web', {}, 'x');
+  service.rollback('web', { release: 1 }, 'x');
+  assert.equal(unpublished(), true, 'live content is release 1, draft still says B');
+  service.rollback('web', { release: 1, restoreDraft: true }, 'x');
+  assert.equal(unpublished(), false);
+});

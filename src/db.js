@@ -11,8 +11,12 @@ export class Database extends CoreDatabase {
       created_by       TEXT NOT NULL,
       created_at       INTEGER NOT NULL,
       updated_at       INTEGER NOT NULL,
-      -- Last change to the draft (locales, keys, values); compared with the latest release.
-      draft_updated_at INTEGER NOT NULL
+      -- Last change to the draft (locales, keys, values).
+      draft_updated_at INTEGER NOT NULL,
+      -- Bumped on every draft change; published_version is the draft version the latest release
+      -- holds, NULL when the latest release does not match the draft (never published, rollback).
+      draft_version     INTEGER NOT NULL DEFAULT 0,
+      published_version INTEGER
     );
 
     CREATE TABLE locales (

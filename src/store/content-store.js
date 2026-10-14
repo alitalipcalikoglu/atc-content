@@ -6,7 +6,7 @@
 
 /** Persistence for the draft: namespaces, their locales, keys and per-locale values. */
 export class ContentStore {
-  static NS = 'name, default_locale, description, created_by, created_at, updated_at, draft_updated_at';
+  static NS = 'name, default_locale, description, created_by, created_at, updated_at, draft_updated_at, draft_version, published_version';
   static TR = 'ns, key, locale, value, placeholders, updated_by, updated_at';
 
   /** @param {Database} db */
@@ -15,11 +15,12 @@ export class ContentStore {
     const N = ContentStore.NS;
     const T = ContentStore.TR;
     this.stmt = {
-      insertNs: db.prepare(`INSERT INTO namespaces (${N}) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+      insertNs: db.prepare('INSERT INTO namespaces (name, default_locale, description, created_by, created_at, updated_at, draft_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
       ns: db.prepare(`SELECT ${N} FROM namespaces WHERE name = ?`),
       allNs: db.prepare(`SELECT ${N} FROM namespaces ORDER BY name`),
       updateNs: db.prepare('UPDATE namespaces SET default_locale = ?, description = ?, updated_at = ? WHERE name = ?'),
-      touch: db.prepare('UPDATE namespaces SET draft_updated_at = ? WHERE name = ?'),
+      touch: db.prepare('UPDATE namespaces SET draft_updated_at = ?, draft_version = draft_version + 1 WHERE name = ?'),
+      markPublished: db.prepare('UPDATE namespaces SET published_version = ? WHERE name = ?'),
       deleteNs: db.prepare('DELETE FROM namespaces WHERE name = ?'),
       insertLocale: db.prepare('INSERT INTO locales (ns, locale, fallback, created_at) VALUES (?, ?, ?, ?)'),
       setFallback: db.prepare('UPDATE locales SET fallback = ? WHERE ns = ? AND locale = ?'),
@@ -54,7 +55,7 @@ export class ContentStore {
     };
   }
 
-  /** @param {Omit<NamespaceRow, 'draft_updated_at'>} n */
+  /** @param {Omit<NamespaceRow, 'draft_updated_at'|'draft_version'|'published_version'>} n */
   insertNamespace(n) {
     this.stmt.insertNs.run(n.name, n.default_locale, n.description, n.created_by, n.created_at, n.updated_at, n.updated_at);
   }
@@ -77,6 +78,11 @@ export class ContentStore {
   /** Mark the draft as changed. @param {string} name @param {number} now */
   touch(name, now) {
     this.stmt.touch.run(now, name);
+  }
+
+  /** Record which draft version the latest release holds; null = it holds something else. @param {string} name @param {number|null} version */
+  markPublished(name, version) {
+    this.stmt.markPublished.run(version, name);
   }
 
   /** @param {string} name */

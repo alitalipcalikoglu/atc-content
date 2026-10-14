@@ -46,6 +46,8 @@
  * @property {number} created_at
  * @property {number} updated_at
  * @property {number} draft_updated_at
+ * @property {number} draft_version
+ * @property {number|null} published_version
  */
 
 /**
