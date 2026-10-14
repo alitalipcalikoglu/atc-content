@@ -4,7 +4,7 @@ import { ContentError } from '../domain/errors.js';
 /** @typedef {import('../types.js').ApiKey} ApiKey */
 
 /**
- * Bearer API-key authentication with read/write roles. Thin wrapper over service-core's
+ * Bearer API-key authentication with read/write roles and optional namespace scopes. Thin wrapper over service-core's
  * `ApiKeyAuth`; routes marked `config.publicRead` may also be called without any key when public
  * bundles are enabled.
  */
@@ -24,6 +24,19 @@ export class ApiKeyAuth {
     if (this.publicReads && request.headers.authorization === undefined && /** @type {any} */ (request.routeOptions.config).publicRead === true) return;
     return this.core.hook(request, reply);
   };
+
+  /**
+   * A key with namespace scopes (`id:secret:role:web+shop`) reaches only those namespaces: any route naming
+   * another one answers 403, namespace listings are filtered and the totals (`/stats`) are refused. Unscoped
+   * keys and anonymous public reads are not limited here.
+   * @param {import('fastify').FastifyRequest} request
+   */
+  static assertNamespaceScope(request) {
+    const scopes = request.apiKey?.scopes;
+    if (!scopes) return;
+    const ns = /** @type {{ ns?: string }} */ (request.params)?.ns ?? (request.method === 'POST' && request.routeOptions.url === '/v1/namespaces' ? /** @type {any} */ (request.body)?.name : undefined);
+    if (ns !== undefined && !scopes.includes(ns)) throw new ContentError('FORBIDDEN', `this API key has no access to namespace "${ns}"`);
+  }
 
   /**
    * Route-level guard on role. `allowAnonymous` lets requests the hook passed without a key through.

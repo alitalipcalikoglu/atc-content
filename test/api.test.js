@@ -208,3 +208,25 @@ test('API: X-Actor names the acting person only for ACTOR_KEYS keys', async (t) 
   assert.equal(json(bad).namespace.createdBy, 'console', 'malformed header falls back to the key id');
   await assert.rejects(buildApp({ ACTOR_KEYS: 'ghost' }), /ACTOR_KEYS names "ghost"/);
 });
+
+test('namespace scopes: a scoped key reaches only its namespaces; listings are filtered; totals and other namespaces are refused', async (t) => {
+  const SCOPED = 's'.repeat(40);
+  const { app } = await buildApp({ CONTENT_API_KEYS: `console:${RW_KEY},site:${SCOPED}:read:web,editor:${WRITE_KEY}:write:web+shop` });
+  t.after(() => app.close());
+  await seed(app);
+  const mk = (/** @type {string} */ name) => app.inject({ method: 'POST', url: '/v1/namespaces', headers: bearer(RW_KEY), payload: { name, defaultLocale: 'en', locales: [] } });
+  await mk('other');
+  await app.inject({ method: 'POST', url: '/v1/namespaces/web/publish', headers: bearer(RW_KEY), payload: {} });
+  assert.equal((await app.inject({ url: '/v1/bundles/web/en', headers: bearer(SCOPED) })).statusCode, 200);
+  const denied = await app.inject({ url: '/v1/bundles/other/en', headers: bearer(SCOPED) });
+  assert.deepEqual([denied.statusCode, json(denied).error.code], [403, 'FORBIDDEN']);
+  assert.deepEqual(json(await app.inject({ url: '/v1/namespaces', headers: bearer(SCOPED) })).items.map((/** @type {any} */ n) => n.name), ['web']);
+  assert.equal((await app.inject({ url: '/v1/stats', headers: bearer(SCOPED) })).statusCode, 403);
+  assert.equal((await app.inject({ url: '/v1/stats', headers: bearer(RW_KEY) })).statusCode, 200, 'an unscoped key sees everything');
+  assert.equal((await app.inject({ method: 'PUT', url: '/v1/namespaces/other/keys/x', headers: bearer(WRITE_KEY), payload: { values: { en: 'x' } } })).statusCode, 403, 'a scoped writer cannot write elsewhere');
+  assert.equal((await mkAs(app, WRITE_KEY, 'shop')).statusCode, 201, 'but may create a namespace inside its scope');
+  assert.equal((await mkAs(app, WRITE_KEY, 'forbidden')).statusCode, 403);
+});
+
+/** @param {import('fastify').FastifyInstance} app @param {string} key @param {string} name */
+const mkAs = (app, key, name) => app.inject({ method: 'POST', url: '/v1/namespaces', headers: bearer(key), payload: { name, defaultLocale: 'en', locales: [] } });

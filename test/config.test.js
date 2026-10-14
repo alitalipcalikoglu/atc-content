@@ -20,7 +20,8 @@ test('Config: rejects bad input', () => {
   bad({ CONTENT_API_KEYS: '' }, /CONTENT_API_KEYS is required/);
   bad({ CONTENT_API_KEYS: 'a:short' }, /at least 32/);
   bad({ CONTENT_API_KEYS: `a:${'a'.repeat(40)}:owner` }, /read, write or readwrite/);
-  bad({ CONTENT_API_KEYS: `a:${'a'.repeat(40)}:read:extra` }, /id:secret\[:role\]/);
+  bad({ CONTENT_API_KEYS: `a:${'a'.repeat(40)}:read:Bad_NS` }, /invalid namespace/);
+  bad({ CONTENT_API_KEYS: `a:${'a'.repeat(40)}:read:web:more` }, /id:secret\[:role/);
   bad({ CONTENT_API_KEYS: `a:${'a'.repeat(40)},b:${'a'.repeat(40)}` }, /unique/);
   bad({ TLS_CERT_PATH: '/x.pem' }, /must be set together/);
   bad({ AUDIT_URL: 'http://audit' }, /must be set together/);

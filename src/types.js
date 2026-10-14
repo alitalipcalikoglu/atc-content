@@ -9,6 +9,7 @@
  * @property {string} id
  * @property {string} secret
  * @property {KeyRole} role
+ * @property {string[]|null} scopes  Namespaces this key may reach; null = all.
  */
 
 /**

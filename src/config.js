@@ -82,7 +82,7 @@ export class Config {
    * @returns {ApiKey[]}
    */
   static #parseApiKeys(raw) {
-    return parseApiKeys(raw, 'CONTENT_API_KEYS', { roles: ['read', 'write', 'readwrite'], minSecretLength: Config.MIN_SECRET_LENGTH, roleErrorMessage: () => 'must be read, write or readwrite' })
-      .map(({ id, secret, role }) => ({ id, secret, role: /** @type {KeyRole} */ (role) }));
+    return parseApiKeys(raw, 'CONTENT_API_KEYS', { roles: ['read', 'write', 'readwrite'], scopePattern: /^[a-z][a-z0-9-]{0,63}$/, scopeNoun: 'namespace', minSecretLength: Config.MIN_SECRET_LENGTH, roleErrorMessage: () => 'must be read, write or readwrite' })
+      .map(({ id, secret, role, scopes }) => ({ id, secret, role: /** @type {KeyRole} */ (role), scopes }));
   }
 }

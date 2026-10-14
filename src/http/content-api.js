@@ -93,8 +93,9 @@ export class ContentApi {
       errorResponseBuilder: (_request, context) => Object.assign(new Error(`rate limit exceeded, retry in ${context.after}`), { statusCode: 429, code: 'RATE_LIMITED' }),
     });
     const s = this.service;
-    const read = { preHandler: ApiKeyAuth.require('read') };
-    const write = { preHandler: ApiKeyAuth.require('write') };
+    const scoped = async (/** @type {FastifyRequest} */ request) => ApiKeyAuth.assertNamespaceScope(request);
+    const read = { preHandler: [ApiKeyAuth.require('read'), scoped] };
+    const write = { preHandler: [ApiKeyAuth.require('write'), scoped] };
     const p = (/** @type {FastifyRequest} */ r) => /** @type {{ ns: string, key: string, locale: string, number: string }} */ (r.params);
     const who = new Actor(this.config.actorKeys);
     const actor = (/** @type {FastifyRequest} */ r) => who.of(r);
@@ -104,7 +105,7 @@ export class ContentApi {
     const keyTarget = (/** @type {FastifyRequest} */ r) => ({ type: 'key', id: `${p(r).ns}/${p(r).key}` });
 
     // ---- namespaces
-    api.get('/namespaces', read, async () => ({ items: this.content.namespaces().map((n) => Views.namespace(n, s.summary(n))) }));
+    api.get('/namespaces', read, async (request) => ({ items: this.content.namespaces().filter((n) => !request.apiKey?.scopes || request.apiKey.scopes.includes(n.name)).map((n) => Views.namespace(n, s.summary(n))) }));
 
     api.post('/namespaces', { config: { audit: AuditClient.route('atc-content.namespace.create', (_r, b) => ({ type: 'namespace', id: b.namespace.name }), (_r, b) => ({ defaultLocale: b.namespace.defaultLocale, locales: b.namespace.locales.map((/** @type {any} */ l) => l.locale) })) }, ...write, schema: { body: Schemas.createNamespace } }, async (request, reply) => {
       const row = s.createNamespace(/** @type {any} */ (request.body), actor(request));
@@ -195,7 +196,7 @@ export class ContentApi {
     });
 
     // ---- bundles for applications
-    api.get('/bundles/:ns/:locale', { config: { publicRead: true }, preHandler: ApiKeyAuth.require('read', { allowAnonymous: true }), schema: { params: Schemas.localeParams } }, async (request, reply) => {
+    api.get('/bundles/:ns/:locale', { config: { publicRead: true }, preHandler: [ApiKeyAuth.require('read', { allowAnonymous: true }), scoped], schema: { params: Schemas.localeParams } }, async (request, reply) => {
       const { ns, locale } = p(request);
       const { body, etag } = s.bundle(ns, locale);
       reply.header('etag', etag).header('cache-control', ContentApi.BUNDLE_CACHE_CONTROL);
@@ -207,7 +208,10 @@ export class ContentApi {
       return reply.type('application/json; charset=utf-8').send(body);
     });
 
-    api.get('/stats', read, async () => s.stats());
+    api.get('/stats', read, async (request) => {
+      if (request.apiKey?.scopes) throw new ContentError('FORBIDDEN', 'the totals need a key without namespace scopes');
+      return s.stats();
+    });
   }
 
   /**

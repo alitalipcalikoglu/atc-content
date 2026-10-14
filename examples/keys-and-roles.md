@@ -41,3 +41,13 @@ curl -s -H "Authorization: Bearer $CONSOLE_KEY" -H "X-Actor: ayse.k" ...
 ```
 
 Records created by that call carry `ayse.k` (in `createdBy`, `updatedBy`) instead of `atc-console`. The value must match `[A-Za-z0-9][A-Za-z0-9._@-]{0,63}`; anything else, and the header from any key not in the list, is ignored and the key id is recorded. Audit events keep the key as the actor. The console sends the signed-in admin's username.
+
+## Namespace scopes
+
+A fourth field limits a key to some namespaces (`+` separated):
+
+```bash
+CONTENT_API_KEYS=atc-console:<64 hex>,web-frontend:<64 hex>:read:web+shop,translation-sync:<64 hex>:write:web
+```
+
+A scoped key gets `403 FORBIDDEN` for any route that names another namespace (bundles, keys, import, publish, ...), sees only its own namespaces in `GET /v1/namespaces`, may create a namespace only inside its scope, and is refused `GET /v1/stats` (the totals cover everything). Use it for the key you hand to a front end or a gateway route: if that key leaks, only the namespaces it was given are exposed. Scopes are checked against names, not existence: a scoped key can create `web` if it is allowed `web`.
