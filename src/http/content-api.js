@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import { AuditClient } from '@atc-web/atc-service-core/audit';
 import { createErrorHandler, registerInfo, registerOpenApi, registerProbes, registerRequestContext, requestOptions } from '@atc-web/atc-service-core/fastify';
 import { ContentError } from '../domain/errors.js';
+import { Actor } from './actor.js';
 import { ApiKeyAuth } from './api-key-auth.js';
 import { Schemas } from './schemas.js';
 import { Views } from './views.js';
@@ -92,7 +93,8 @@ export class ContentApi {
     const read = { preHandler: ApiKeyAuth.require('read') };
     const write = { preHandler: ApiKeyAuth.require('write') };
     const p = (/** @type {FastifyRequest} */ r) => /** @type {{ ns: string, key: string, locale: string, number: string }} */ (r.params);
-    const actor = (/** @type {FastifyRequest} */ r) => r.apiKey?.id ?? 'anonymous';
+    const who = new Actor(this.config.actorKeys);
+    const actor = (/** @type {FastifyRequest} */ r) => who.of(r);
     const nsView = (/** @type {string} */ name) => { const n = s.namespace(name); return Views.namespace(n, s.summary(n)); };
     const keyView = (/** @type {string} */ ns, /** @type {string} */ key) => Views.key(s.key(ns, key), this.content.translationsOfKey(ns, key), s.namespace(ns).default_locale);
     const nsTarget = (/** @type {FastifyRequest} */ r) => ({ type: 'namespace', id: p(r).ns });

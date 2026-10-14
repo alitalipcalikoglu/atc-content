@@ -32,6 +32,7 @@
  * @property {string} dbPath
  * @property {string} [dbBackupDir]
  * @property {ApiKey[]} apiKeys
+ * @property {string[]} actorKeys   Key ids whose `X-Actor` header names the acting person.
  * @property {boolean} publicBundles   Serve `GET /v1/bundles/*` without a key.
  * @property {number} rateLimitMax
  * @property {Limits} limits

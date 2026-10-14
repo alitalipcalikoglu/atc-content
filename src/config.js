@@ -21,6 +21,7 @@ export class Config {
     this.dbPath = v.dbPath;
     this.dbBackupDir = v.dbBackupDir;
     this.apiKeys = v.apiKeys;
+    this.actorKeys = v.actorKeys;
     this.publicBundles = v.publicBundles;
     this.rateLimitMax = v.rateLimitMax;
     this.limits = Object.freeze({ ...v.limits });
@@ -38,6 +39,7 @@ export class Config {
     const keyPath = r.optional('TLS_KEY_PATH');
     if (Boolean(certPath) !== Boolean(keyPath)) throw new ConfigError('TLS_CERT_PATH and TLS_KEY_PATH must be set together');
 
+    const apiKeys = Config.#parseApiKeys(r.required('CONTENT_API_KEYS'));
     return new Config({
       port: r.integer('PORT', 3013, { min: 0, max: 65535 }),
       host: r.optional('HOST') || '0.0.0.0',
@@ -48,7 +50,8 @@ export class Config {
       bodyLimit: r.integer('BODY_LIMIT', 1_048_576, { min: 1_024 }),
       dbPath: r.optional('DB_PATH') || './data/content.db',
       dbBackupDir: r.optional('DB_BACKUP_DIR') || undefined,
-      apiKeys: Config.#parseApiKeys(r.required('CONTENT_API_KEYS')),
+      apiKeys,
+      actorKeys: Config.#actorKeys(r, apiKeys),
       publicBundles: r.boolean('CONTENT_PUBLIC_BUNDLES', false),
       rateLimitMax: r.integer('RATE_LIMIT_MAX', 1_200, { min: 1 }),
       limits: {
@@ -58,6 +61,16 @@ export class Config {
         releaseRetention: r.integer('RELEASE_RETENTION', 100, { min: 1 }),
       },
     });
+  }
+
+  /**
+   * `ACTOR_KEYS`: ids of keys allowed to name the acting person in `X-Actor` (the console).
+   * @param {EnvReader} r @param {ApiKey[]} apiKeys
+   */
+  static #actorKeys(r, apiKeys) {
+    const ids = r.optional('ACTOR_KEYS').split(',').map((s) => s.trim()).filter(Boolean);
+    for (const id of ids) if (!apiKeys.some((k) => k.id === id)) throw new ConfigError(`ACTOR_KEYS names "${id}", which is not a key id in the API keys`);
+    return ids;
   }
 
   /**

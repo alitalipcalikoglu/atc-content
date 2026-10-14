@@ -90,6 +90,7 @@ All configuration is environment variables; see [.env.example](.env.example) for
 |---|---|---|
 | `PORT`, `HOST` | `3013`, `0.0.0.0` | Listen address |
 | `CONTENT_API_KEYS` | required | `id:secret[:role]`, comma separated; role `read`, `write` or `readwrite` (default); secrets ≥ 32 chars, unique |
+| `ACTOR_KEYS` | empty | Key ids (the console) that may name the acting person in an `X-Actor` header; records show that name instead of the key id. Ignored for every other key |
 | `CONTENT_PUBLIC_BUNDLES` | `false` | Serve bundles to requests without an `Authorization` header |
 | `DB_PATH`, `DB_BACKUP_DIR` | `./data/content.db`, next to the file | SQLite file; pre-migration snapshot directory |
 | `BODY_LIMIT` | `1048576` | Request body bytes (bounds one import) |

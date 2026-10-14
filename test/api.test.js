@@ -191,3 +191,15 @@ test('API: rate limit per key', async (t) => {
   assert.deepEqual([limited.statusCode, json(limited).error.code], [429, 'RATE_LIMITED']);
   assert.equal((await app.inject({ url: '/v1/namespaces', headers: bearer(RW_KEY) })).statusCode, 200);
 });
+
+test('API: X-Actor names the acting person only for ACTOR_KEYS keys', async (t) => {
+  const { app } = await buildApp({ ACTOR_KEYS: 'console' });
+  t.after(() => app.close());
+  const res = await app.inject({ method: 'POST', url: '/v1/namespaces', headers: { ...bearer(RW_KEY), 'x-actor': 'ayse.k' }, payload: { name: 'web', defaultLocale: 'en' } });
+  assert.equal(json(res).namespace.createdBy, 'ayse.k');
+  const other = await app.inject({ method: 'POST', url: '/v1/namespaces', headers: { ...bearer(WRITE_KEY), 'x-actor': 'ayse.k' }, payload: { name: 'app', defaultLocale: 'en' } });
+  assert.equal(json(other).namespace.createdBy, 'translator', 'untrusted keys cannot name someone else');
+  const bad = await app.inject({ method: 'POST', url: '/v1/namespaces', headers: { ...bearer(RW_KEY), 'x-actor': 'no spaces allowed' }, payload: { name: 'm', defaultLocale: 'en' } });
+  assert.equal(json(bad).namespace.createdBy, 'console', 'malformed header falls back to the key id');
+  await assert.rejects(buildApp({ ACTOR_KEYS: 'ghost' }), /ACTOR_KEYS names "ghost"/);
+});
