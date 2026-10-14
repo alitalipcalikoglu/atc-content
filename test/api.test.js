@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { AuditClient } from '@atc-web/atc-service-core/audit';
 import { test } from 'node:test';
 import { ContentApi } from '../src/http/content-api.js';
 import { READ_KEY, RW_KEY, WRITE_KEY, bearer, buildApp } from './helpers.js';
@@ -193,12 +194,16 @@ test('API: rate limit per key', async (t) => {
 });
 
 test('API: X-Actor names the acting person only for ACTOR_KEYS keys', async (t) => {
-  const { app } = await buildApp({ ACTOR_KEYS: 'console' });
+  const audit = new AuditClient({ target: { url: 'http://audit.test', apiKey: 'a'.repeat(40) }, logger: { warn() {}, error() {} }, fetch: async () => new Response('{}', { status: 200 }) });
+  const { app } = await buildApp({ ACTOR_KEYS: 'console' }, { audit });
   t.after(() => app.close());
   const res = await app.inject({ method: 'POST', url: '/v1/namespaces', headers: { ...bearer(RW_KEY), 'x-actor': 'ayse.k' }, payload: { name: 'web', defaultLocale: 'en' } });
   assert.equal(json(res).namespace.createdBy, 'ayse.k');
   const other = await app.inject({ method: 'POST', url: '/v1/namespaces', headers: { ...bearer(WRITE_KEY), 'x-actor': 'ayse.k' }, payload: { name: 'app', defaultLocale: 'en' } });
   assert.equal(json(other).namespace.createdBy, 'translator', 'untrusted keys cannot name someone else');
+  const [named, plain] = audit.buffer;
+  assert.deepEqual([named.actor, /** @type {any} */ (named.meta)?.via], [{ type: 'admin', id: 'ayse.k' }, 'console'], 'audit names the admin, the key stays in meta.via');
+  assert.deepEqual([plain.actor?.type, /** @type {any} */ (plain.meta)?.via], ['apikey', undefined]);
   const bad = await app.inject({ method: 'POST', url: '/v1/namespaces', headers: { ...bearer(RW_KEY), 'x-actor': 'no spaces allowed' }, payload: { name: 'm', defaultLocale: 'en' } });
   assert.equal(json(bad).namespace.createdBy, 'console', 'malformed header falls back to the key id');
   await assert.rejects(buildApp({ ACTOR_KEYS: 'ghost' }), /ACTOR_KEYS names "ghost"/);

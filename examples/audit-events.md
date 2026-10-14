@@ -46,3 +46,14 @@ Targets are `{ "type": "namespace", "id": "<ns>" }`, or `{ "type": "key", "id": 
 ```
 
 `meta` carries the request patch or a summary (counts) where useful; secrets never appear in it. Query the audit service by `source=atc-content`, `actionPrefix=atc-content.` or by target to reconstruct what happened to an entity.
+
+
+## Who is the actor
+
+The actor is the calling API key (`{ "type": "apikey", "id": "<key id>" }`). When the key is listed in `ACTOR_KEYS` (the console) and sends a valid `X-Actor` header, the event names that person instead, and the key moves to `meta.via`:
+
+```json
+{ "action": "atc-content.namespace.create", "actor": { "type": "admin", "id": "ayse.k" }, "meta": { "via": "atc-console" } }
+```
+
+`X-Actor` from any other key is ignored; its events keep the key as actor.

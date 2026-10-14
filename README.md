@@ -143,7 +143,7 @@ docs/READINESS.md        operational contract
 
 ## Audit events
 
-With `AUDIT_URL` and `AUDIT_API_KEY` set, every completed write request is forwarded to the audit service as one event (`success`, or `denied` on 403) with the calling key as actor, the namespace or key as target, client IP, user agent and request id. Actions: `atc-content.namespace.create|update|delete`, `atc-content.locale.upsert|delete`, `atc-content.key.upsert|delete`, `atc-content.translations.import`, `atc-content.release.publish|rollback`. Events are buffered and sent in batches; the audit service being down never fails a request. Event shape and `meta` per action: [examples/audit-events.md](examples/audit-events.md).
+With `AUDIT_URL` and `AUDIT_API_KEY` set, every completed write request is forwarded to the audit service as one event (`success`, or `denied` on 403) with the calling key as actor (or, for an `ACTOR_KEYS` key sending `X-Actor`, that admin as actor and the key in `meta.via`), the namespace or key as target, client IP, user agent and request id. Actions: `atc-content.namespace.create|update|delete`, `atc-content.locale.upsert|delete`, `atc-content.key.upsert|delete`, `atc-content.translations.import`, `atc-content.release.publish|rollback`. Events are buffered and sent in batches; the audit service being down never fails a request. Event shape and `meta` per action: [examples/audit-events.md](examples/audit-events.md).
 
 ## Scaling model
 

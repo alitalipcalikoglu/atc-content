@@ -59,7 +59,7 @@ export class ContentApi {
     registerRequestContext(app, { trustProxy: config.trustProxy });
     app.decorateRequest('apiKey', null);
     app.setErrorHandler(createErrorHandler(ContentError));
-    app.addHook('onSend', AuditClient.hook(this.audit));
+    app.addHook('onSend', new Actor(config.actorKeys).auditHook(this.audit));
     app.setNotFoundHandler((_request, reply) => {
       reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'route not found' } });
     });
