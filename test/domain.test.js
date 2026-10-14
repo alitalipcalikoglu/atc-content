@@ -7,9 +7,9 @@ import { testService, tickingClock } from './helpers.js';
 /** @param {string} code */
 const fails = (code) => (/** @type {unknown} */ e) => e instanceof ContentError && e.code === code;
 
-/** Namespace `web`: en (default), tr, tr-CY -> tr. */
-function seeded(overrides = {}) {
-  const t = testService(overrides, tickingClock());
+/** Namespace `web`: en (default), tr, tr-CY -> tr. @param {Record<string, string>} [overrides] @param {any} [publisher] */
+function seeded(overrides = {}, publisher = undefined) {
+  const t = testService(overrides, tickingClock(), publisher);
   t.service.createNamespace({ name: 'web', defaultLocale: 'en', locales: [{ locale: 'tr-cy', fallback: 'tr' }, { locale: 'tr' }] }, 'console');
   return t;
 }
@@ -197,4 +197,19 @@ test('draft state: unpublished changes follow edits, publish and rollback', () =
   assert.equal(unpublished(), true, 'live content is release 1, draft still says B');
   service.rollback('web', { release: 1, restoreDraft: true }, 'x');
   assert.equal(unpublished(), false);
+});
+
+test('events: publish and rollback announce the release; each with the release number', () => {
+  /** @type {any[]} */ const out = [];
+  const { service } = seeded({}, { publish: (/** @type {string} */ t, /** @type {any} */ d) => out.push([t, d]) });
+  service.upsertKey('web', 'hello', { values: { en: 'Hello' } }, 'x');
+  service.publish('web', {}, 'console');
+  service.upsertKey('web', 'hello', { values: { en: 'Hi' } }, 'x');
+  service.publish('web', {}, 'console');
+  service.rollback('web', { release: 1 }, 'console');
+  assert.deepEqual(out, [
+    ['content.release.published', { namespace: 'web', release: 1, keyCount: 1, by: 'console' }],
+    ['content.release.published', { namespace: 'web', release: 2, keyCount: 1, by: 'console' }],
+    ['content.release.rolled_back', { namespace: 'web', release: 3, rollbackOf: 1, by: 'console' }],
+  ]);
 });

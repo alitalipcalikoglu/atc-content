@@ -100,6 +100,7 @@ All configuration is environment variables; see [.env.example](.env.example) for
 | `RELEASE_RETENTION` | `100` | Releases kept per namespace |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-*` and `traceparent` from a reverse proxy |
 | `TLS_CERT_PATH`, `TLS_KEY_PATH` | empty | Serve HTTPS directly (both or neither) |
+| `WEBHOOK_OUT_URL`, `WEBHOOK_OUT_API_KEY`, `WEBHOOK_OUT_TIMEOUT_MS` | empty, empty, `5000` | Publish events to atc-webhook-out (URL and key both or neither; a `publish` key) |
 | `AUDIT_URL`, `AUDIT_API_KEY` | empty | Forward audit events (both or neither) |
 | `LOG_LEVEL` | `info` | Pino level |
 
@@ -141,6 +142,10 @@ docs/READINESS.md        operational contract
 - Draft change history per value. Releases are the history; `updatedBy` shows the last editor per value.
 - Machine translation and translator workflow states (review, approval).
 
+## Events
+
+With `WEBHOOK_OUT_URL` set, a publish sends `content.release.published` and a rollback `content.release.rolled_back` (namespace, release number, actor). Subscribers refresh their copy instead of waiting for `max-age`. Best effort; see [examples/events.md](examples/events.md).
+
 ## Audit events
 
 With `AUDIT_URL` and `AUDIT_API_KEY` set, every completed write request is forwarded to the audit service as one event (`success`, or `denied` on 403) with the calling key as actor (or, for an `ACTOR_KEYS` key sending `X-Actor`, that admin as actor and the key in `meta.via`), the namespace or key as target, client IP, user agent and request id. Actions: `atc-content.namespace.create|update|delete`, `atc-content.locale.upsert|delete`, `atc-content.key.upsert|delete`, `atc-content.translations.import`, `atc-content.release.publish|rollback`. Events are buffered and sent in batches; the audit service being down never fails a request. Event shape and `meta` per action: [examples/audit-events.md](examples/audit-events.md).
@@ -152,6 +157,8 @@ With `AUDIT_URL` and `AUDIT_API_KEY` set, every completed write request is forwa
 ## Observability
 
 Structured request logs with request id and trace context, `/metrics` in Prometheus text (namespaces, keys, locales, missing and mismatched translations, latest release and publish time per namespace, bundle requests), `/v1/stats` for dashboards, and `/ready` that pings the database (cached 10 s). See [docs/READINESS.md](docs/READINESS.md).
+
+Event publishing is observable as `events_publish_enabled`, `events_publish_total{result="published|sent|dropped|failed"}` and `events_publish_pending`.
 
 Audit forwarding is observable too: `audit_forward_enabled`, `audit_forward_events_total{result="recorded|sent|dropped|failed"}` and `audit_forward_pending`. A rising `dropped`, or a `pending` that does not drain, means audit events are being lost or delayed; alert on it.
 

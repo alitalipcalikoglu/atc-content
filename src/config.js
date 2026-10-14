@@ -1,4 +1,5 @@
 import { ConfigError, EnvReader, parseApiKeys, parseAudit } from '@atc-web/atc-service-core/config';
+import { EventPublisher } from './events/event-publisher.js';
 
 /** @typedef {import('./types.js').ApiKey} ApiKey */
 /** @typedef {import('./types.js').KeyRole} KeyRole */
@@ -17,6 +18,7 @@ export class Config {
     this.trustProxy = v.trustProxy;
     this.tls = v.tls;
     this.audit = v.audit;
+    this.webhookOut = v.webhookOut;
     this.bodyLimit = v.bodyLimit;
     this.dbPath = v.dbPath;
     this.dbBackupDir = v.dbBackupDir;
@@ -47,6 +49,7 @@ export class Config {
       trustProxy: r.boolean('TRUST_PROXY', false),
       tls: certPath ? { certPath, keyPath } : null,
       audit: parseAudit(r),
+      webhookOut: EventPublisher.parseEnv(r, ConfigError),
       bodyLimit: r.integer('BODY_LIMIT', 1_048_576, { min: 1_024 }),
       dbPath: r.optional('DB_PATH') || './data/content.db',
       dbBackupDir: r.optional('DB_BACKUP_DIR') || undefined,

@@ -27,13 +27,15 @@ export class ContentService {
    * @param {ReleaseStore} deps.releases
    * @param {Limits} deps.limits
    * @param {() => number} [deps.clock]
+   * @param {{ publish: (type: string, data?: unknown) => boolean }} [deps.publisher]
    */
-  constructor({ db, content, releases, limits, clock = Date.now }) {
+  constructor({ db, content, releases, limits, clock = Date.now, publisher }) {
     this.db = db;
     this.content = content;
     this.releases = releases;
     this.limits = limits;
     this.clock = clock;
+    this.publisher = publisher ?? { publish: () => false };
     /** Serialized bundle bodies by namespace, release and locale. @type {Map<string, { body: string, etag: string }>} */
     this.bundleCache = new Map();
     /** Process-local bundle request counters by namespace and outcome. @type {Map<string, { ok: number, notModified: number }>} */
@@ -361,7 +363,7 @@ export class ContentService {
 
   /** @param {string} ns @param {{ note?: string }} input @param {string} actor */
   publish(ns, input, actor) {
-    return this.db.transaction(() => {
+    const out = this.db.transaction(() => {
       const row = this.namespace(ns);
       const problems = [
         ...this.content.mismatched(ns).map((p) => ({ ...p, reason: 'placeholders differ from the default locale' })),
@@ -372,6 +374,8 @@ export class ContentService {
       this.content.markPublished(ns, row.draft_version);
       return out;
     });
+    this.publisher.publish('content.release.published', { namespace: ns, release: out.number, keyCount: out.key_count, by: actor });
+    return out;
   }
 
   /**
@@ -382,7 +386,7 @@ export class ContentService {
    * @param {string} actor
    */
   rollback(ns, input, actor) {
-    return this.db.transaction(() => {
+    const out = this.db.transaction(() => {
       this.namespace(ns);
       const content = this.releases.content(ns, input.release);
       if (!content) throw new ContentError('RELEASE_NOT_FOUND', `release ${input.release} of "${ns}" does not exist`);
@@ -391,6 +395,8 @@ export class ContentService {
       this.content.markPublished(ns, input.restoreDraft ? this.namespace(ns).draft_version : null);
       return out;
     });
+    this.publisher.publish('content.release.rolled_back', { namespace: ns, release: out.number, rollbackOf: input.release, by: actor });
+    return out;
   }
 
   /** @param {string} ns @param {number} number */

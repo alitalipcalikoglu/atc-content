@@ -30,13 +30,14 @@ export function testConfig(overrides) {
  * Wired domain objects over an in-memory database.
  * @param {Record<string, string>} [overrides]
  * @param {() => number} [clock]
+ * @param {any} [publisher]
  */
-export function testService(overrides, clock) {
+export function testService(overrides, clock, publisher) {
   const config = testConfig(overrides);
   const db = new Database(':memory:');
   const content = new ContentStore(db);
   const releases = new ReleaseStore(db);
-  const service = new ContentService({ db, content, releases, limits: config.limits, clock });
+  const service = new ContentService({ db, content, releases, limits: config.limits, clock, publisher });
   return { config, db, content, releases, service };
 }
 

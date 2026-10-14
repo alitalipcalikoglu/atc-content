@@ -12,6 +12,7 @@ Scenario-driven walkthroughs of every feature. Requests to `/v1/*` need `Authori
 | [Stats and dashboards](stats.md) | `/v1/stats` for an overview page, what each count means |
 | [API keys and roles](keys-and-roles.md) | Read, write, readwrite; which key goes where |
 | [Operations](operations.md) | Health, readiness, metrics, environment, PM2, Docker, backups |
+| [Events](events.md) | `content.release.published` and `content.release.rolled_back` through atc-webhook-out |
 | [Audit events](audit-events.md) | Which write actions are forwarded to the audit service, event shape, configuration |
 
 Set up once for the examples:

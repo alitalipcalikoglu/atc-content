@@ -34,10 +34,12 @@ export class ContentApi {
    * @param {string} deps.version
    * @param {import('../types.js').Logger} [deps.logger]
    * @param {import('@atc-web/atc-service-core/audit').AuditClient} [deps.audit]
+   * @param {import('../events/event-publisher.js').EventPublisher} [deps.publisher]
    */
-  constructor({ config, audit, service, content, releases, db, version, logger }) {
+  constructor({ config, audit, publisher, service, content, releases, db, version, logger }) {
     this.config = config;
     this.audit = audit;
+    this.publisher = publisher ?? null;
     this.service = service;
     this.content = content;
     this.releases = releases;
@@ -251,6 +253,7 @@ export class ContentApi {
         '# TYPE content_bundle_requests_total counter',
         ...[...this.service.bundleRequests].flatMap(([ns, c]) => [`content_bundle_requests_total{namespace="${label(ns)}",result="ok"} ${c.ok}`, `content_bundle_requests_total{namespace="${label(ns)}",result="not_modified"} ${c.notModified}`]),
         ...AuditMetrics.lines(this.audit),
+        ...(this.publisher?.metricLines() ?? []),
         '# HELP content_process_uptime_seconds Process uptime.',
         '# TYPE content_process_uptime_seconds gauge',
         `content_process_uptime_seconds ${process.uptime().toFixed(0)}`,
