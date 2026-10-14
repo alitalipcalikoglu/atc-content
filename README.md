@@ -138,7 +138,7 @@ docs/READINESS.md        operational contract
 - ICU MessageFormat (plural, select, number/date formatting). Placeholders are simple `{name}` substitutions; `{count, plural, …}` is stored as plain text and not interpreted.
 - Rich content (HTML, Markdown, media). Values are plain strings.
 - Automatic locale truncation: `de-CH` does not fall back to `de` unless `de-CH` is configured with `fallback: "de"`.
-- Per-namespace key scoping, key rotation without restart.
+- Key rotation without restart (edit `CONTENT_API_KEYS` and restart; keys can be limited to namespaces).
 - Draft change history per value. Releases are the history; `updatedBy` shows the last editor per value.
 - Machine translation and translator workflow states (review, approval).
 
