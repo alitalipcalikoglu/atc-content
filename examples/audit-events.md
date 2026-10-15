@@ -23,6 +23,7 @@ One event per completed write request, `outcome: "success"` for 2xx, `outcome: "
 | `atc-content.key.upsert` | `PUT /v1/namespaces/:ns/keys/:key` | `created`, `locales` (changed), `description` (changed or not) |
 | `atc-content.key.delete` | `DELETE /v1/namespaces/:ns/keys/:key` | |
 | `atc-content.translations.import` | `POST /v1/namespaces/:ns/import` | `locale`, `added`, `updated`, `unchanged`, `invalid` |
+| `atc-content.value.review` | `POST /v1/namespaces/:ns/review` | `decision`, `updated`, `skipped` |
 | `atc-content.release.publish` | `POST /v1/namespaces/:ns/publish` | `release`, `keys` |
 | `atc-content.release.rollback` | `POST /v1/namespaces/:ns/rollback` | `release`, `rollbackOf`, `restoreDraft` |
 

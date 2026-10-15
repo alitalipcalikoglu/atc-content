@@ -64,5 +64,14 @@ export class Database extends CoreDatabase {
       PRIMARY KEY (ns, number)
     );
     `,
+    `
+    -- Translator workflow: every value change resets review to pending; a different person approves
+    -- or rejects it. With PUBLISH_REQUIRES_REVIEW only approved values can be published.
+    ALTER TABLE translations ADD COLUMN review TEXT NOT NULL DEFAULT 'pending' CHECK (review IN ('pending', 'approved', 'rejected'));
+    ALTER TABLE translations ADD COLUMN reviewed_by TEXT;
+    ALTER TABLE translations ADD COLUMN reviewed_at INTEGER;
+    ALTER TABLE translations ADD COLUMN review_note TEXT;
+    CREATE INDEX translations_review ON translations (ns, review);
+    `,
   ];
 }

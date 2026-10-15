@@ -8,7 +8,7 @@ import { KeyPaths, Locales, Placeholders } from './rules.js';
 /** @typedef {import('../types.js').ReleaseContent} ReleaseContent */
 /** @typedef {import('../types.js').ImportReport} ImportReport */
 /** @typedef {import('../types.js').Limits} Limits */
-/** @typedef {'added'|'updated'|'unchanged'|{ code: 'INVALID_VALUE'|'DEFAULT_REQUIRED'|'PLACEHOLDER_MISMATCH', reason: string }} SetResult */
+/** @typedef {'added'|'updated'|'unchanged'|{ code: 'INVALID_VALUE'|'INVALID_MESSAGE'|'DEFAULT_REQUIRED'|'PLACEHOLDER_MISMATCH', reason: string }} SetResult */
 
 /**
  * Draft editing, validation, publishing and bundle resolution. Every write runs in one
@@ -112,6 +112,7 @@ export class ContentService {
       mismatched: this.content.mismatched(ns.name).length + this.content.orphans(ns.name).length,
       latest,
       unpublishedChanges: ns.published_version === null || ns.published_version !== ns.draft_version,
+      review: this.content.reviewCounts(ns.name),
     };
   }
 
@@ -261,7 +262,13 @@ export class ContentService {
   #setValue(ns, key, locale, value, actor, now) {
     if (typeof value !== 'string') return { code: 'INVALID_VALUE', reason: 'value must be a string' };
     if (value.length > this.limits.maxValueLength) return { code: 'INVALID_VALUE', reason: `value is longer than ${this.limits.maxValueLength} characters` };
-    const placeholders = Placeholders.of(value);
+    let placeholders;
+    try {
+      placeholders = Placeholders.of(value, locale);
+    } catch (err) {
+      if (err instanceof ContentError) return { code: 'INVALID_MESSAGE', reason: err.message };
+      throw err;
+    }
     if (locale !== ns.default_locale) {
       const def = this.content.translation(ns.name, key, ns.default_locale);
       if (!def) return { code: 'DEFAULT_REQUIRED', reason: `set the ${ns.default_locale} value first` };
@@ -286,6 +293,39 @@ export class ContentService {
       if (others.length) throw new ContentError('DEFAULT_REQUIRED', `remove the ${others.map((t) => t.locale).join(', ')} values before the ${locale} value`);
     }
     return this.content.deleteTranslation(ns.name, key, locale);
+  }
+
+  // ---- review
+
+  /**
+   * Approve or reject values. Each item is checked on its own; the editor of a value cannot review
+   * it (four eyes), and a value changed since the reviewer looked at it (`value` given and different)
+   * is skipped.
+   * @param {string} ns
+   * @param {{ items: { key: string, locale: string, value?: string }[], decision: 'approve'|'reject', note?: string }} input
+   * @param {string} actor
+   * @returns {{ updated: number, skipped: { key: string, locale: string, code: string, reason: string }[] }}
+   */
+  review(ns, input, actor) {
+    return this.db.transaction(() => {
+      this.namespace(ns);
+      const now = this.clock();
+      const review = input.decision === 'approve' ? 'approved' : 'rejected';
+      /** @type {{ key: string, locale: string, code: string, reason: string }[]} */
+      const skipped = [];
+      let updated = 0;
+      for (const item of input.items) {
+        let locale;
+        try { locale = Locales.canonical(item.locale); } catch { skipped.push({ key: item.key, locale: item.locale, code: 'INVALID_LOCALE', reason: 'not a supported locale tag' }); continue; }
+        const t = this.content.translation(ns, item.key, locale);
+        if (!t) { skipped.push({ key: item.key, locale, code: 'NOT_FOUND', reason: 'no value to review' }); continue; }
+        if (t.updated_by === actor) { skipped.push({ key: item.key, locale, code: 'SELF_REVIEW', reason: `${actor} wrote this value; someone else must review it` }); continue; }
+        if (item.value !== undefined && item.value !== t.value) { skipped.push({ key: item.key, locale, code: 'CHANGED', reason: 'the value changed since it was read; review it again' }); continue; }
+        this.content.setReview(ns, item.key, locale, { review, by: actor, at: now, note: input.note ?? null });
+        updated++;
+      }
+      return { updated, skipped };
+    });
   }
 
   // ---- import / export
@@ -368,6 +408,7 @@ export class ContentService {
       const problems = [
         ...this.content.mismatched(ns).map((p) => ({ ...p, reason: 'placeholders differ from the default locale' })),
         ...this.content.orphans(ns).map((p) => ({ ...p, reason: `no ${row.default_locale} value` })),
+        ...(this.limits.publishRequiresReview ? this.content.unapproved(ns).map((p) => ({ key: p.key, locale: p.locale, reason: `not approved (${p.review})` })) : []),
       ];
       if (problems.length) throw new ContentError('UNPUBLISHABLE', `${problems.length} value(s) must be fixed before publishing`, { problems: problems.slice(0, ContentService.REPORT_MAX) });
       const out = this.#release(ns, this.#draftContent(row), { note: input.note ?? '', rollbackOf: null }, actor);
@@ -440,7 +481,7 @@ export class ContentService {
     for (const l of content.locales) if (l.fallback) this.content.setFallback(ns, l.locale, l.fallback);
     for (const [key, k] of Object.entries(content.keys)) {
       this.content.insertKey(ns, key, k.description, now);
-      for (const [locale, value] of Object.entries(k.values)) this.content.upsertTranslation({ ns, key, locale, value, placeholders: Placeholders.of(value), updated_by: actor, updated_at: now });
+      for (const [locale, value] of Object.entries(k.values)) this.content.upsertTranslation({ ns, key, locale, value, placeholders: Placeholders.of(value, locale), updated_by: actor, updated_at: now });
     }
     this.content.touch(ns, now);
   }

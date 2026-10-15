@@ -7,7 +7,7 @@
 /** Persistence for the draft: namespaces, their locales, keys and per-locale values. */
 export class ContentStore {
   static NS = 'name, default_locale, description, created_by, created_at, updated_at, draft_updated_at, draft_version, published_version';
-  static TR = 'ns, key, locale, value, placeholders, updated_by, updated_at';
+  static TR = 'ns, key, locale, value, placeholders, updated_by, updated_at, review, reviewed_by, reviewed_at, review_note';
 
   /** @param {Database} db */
   constructor(db) {
@@ -32,8 +32,12 @@ export class ContentStore {
       deleteKey: db.prepare('DELETE FROM keys WHERE ns = ? AND key = ?'),
       keyCount: db.prepare('SELECT COUNT(*) AS n FROM keys WHERE ns = ?'),
       allKeys: db.prepare('SELECT ns, key, description, created_at, updated_at FROM keys WHERE ns = ? ORDER BY key'),
-      upsertTr: db.prepare(`INSERT INTO translations (${T}) VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(ns, key, locale) DO UPDATE SET value = excluded.value, placeholders = excluded.placeholders, updated_by = excluded.updated_by, updated_at = excluded.updated_at`),
+      upsertTr: db.prepare(`INSERT INTO translations (ns, key, locale, value, placeholders, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ns, key, locale) DO UPDATE SET value = excluded.value, placeholders = excluded.placeholders, updated_by = excluded.updated_by, updated_at = excluded.updated_at,
+          review = 'pending', reviewed_by = NULL, reviewed_at = NULL, review_note = NULL`),
+      setReview: db.prepare('UPDATE translations SET review = ?, reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE ns = ? AND key = ? AND locale = ?'),
+      reviewCounts: db.prepare('SELECT locale, review, COUNT(*) AS n FROM translations WHERE ns = ? GROUP BY locale, review'),
+      unapproved: db.prepare("SELECT key, locale, review FROM translations WHERE ns = ? AND review <> 'approved' ORDER BY key, locale"),
       tr: db.prepare(`SELECT ${T} FROM translations WHERE ns = ? AND key = ? AND locale = ?`),
       trOfKey: db.prepare(`SELECT ${T} FROM translations WHERE ns = ? AND key = ? ORDER BY locale`),
       trOfLocale: db.prepare(`SELECT ${T} FROM translations WHERE ns = ? AND locale = ? ORDER BY key`),
@@ -143,10 +147,10 @@ export class ContentStore {
   /**
    * One page of keys ordered by key, optionally filtered by substring or by a locale without a value.
    * @param {string} ns
-   * @param {{ q?: string, missing?: string, after?: string, limit: number }} f
+   * @param {{ q?: string, missing?: string, review?: string, reviewLocale?: string, after?: string, limit: number }} f
    * @returns {KeyRow[]}
    */
-  listKeys(ns, { q, missing, after, limit }) {
+  listKeys(ns, { q, missing, review, reviewLocale, after, limit }) {
     const where = ['k.ns = ?'];
     /** @type {(string|number)[]} */
     const args = [ns];
@@ -159,6 +163,10 @@ export class ContentStore {
       where.push('NOT EXISTS (SELECT 1 FROM translations t WHERE t.ns = k.ns AND t.key = k.key AND t.locale = ?)');
       args.push(missing);
     }
+    if (review) {
+      where.push(`EXISTS (SELECT 1 FROM translations t WHERE t.ns = k.ns AND t.key = k.key AND t.review = ?${reviewLocale ? ' AND t.locale = ?' : ''})`);
+      args.push(review, ...(reviewLocale ? [reviewLocale] : []));
+    }
     if (after) {
       where.push('k.key > ?');
       args.push(after);
@@ -167,7 +175,7 @@ export class ContentStore {
     return /** @type {KeyRow[]} */ (this.db.prepare(`SELECT k.ns, k.key, k.description, k.created_at, k.updated_at FROM keys k WHERE ${where.join(' AND ')} ORDER BY k.key LIMIT ?`).all(...args));
   }
 
-  /** @param {Omit<TranslationRow, never>} t */
+  /** Insert or change a value; a change resets its review to pending. @param {Omit<TranslationRow, 'review'|'reviewed_by'|'reviewed_at'|'review_note'>} t */
   upsertTranslation(t) {
     this.stmt.upsertTr.run(t.ns, t.key, t.locale, t.value, t.placeholders, t.updated_by, t.updated_at);
   }
@@ -195,6 +203,24 @@ export class ContentStore {
   /** @param {string} ns @param {string} key @param {string} locale */
   deleteTranslation(ns, key, locale) {
     return Number(this.stmt.deleteTr.run(ns, key, locale).changes) > 0;
+  }
+
+  /** @param {string} ns @param {string} key @param {string} locale @param {{ review: 'approved'|'rejected', by: string, at: number, note: string|null }} r */
+  setReview(ns, key, locale, r) {
+    this.stmt.setReview.run(r.review, r.by, r.at, r.note, ns, key, locale);
+  }
+
+  /** @param {string} ns @returns {Record<string, { pending: number, approved: number, rejected: number }>} by locale */
+  reviewCounts(ns) {
+    /** @type {Record<string, { pending: number, approved: number, rejected: number }>} */
+    const out = {};
+    for (const r of /** @type {{ locale: string, review: 'pending'|'approved'|'rejected', n: number }[]} */ (this.stmt.reviewCounts.all(ns))) (out[r.locale] ??= { pending: 0, approved: 0, rejected: 0 })[r.review] = Number(r.n);
+    return out;
+  }
+
+  /** Values not approved yet. @param {string} ns @returns {{ key: string, locale: string, review: string }[]} */
+  unapproved(ns) {
+    return /** @type {{ key: string, locale: string, review: string }[]} */ (this.stmt.unapproved.all(ns));
   }
 
   /** @param {string} ns @returns {Map<string, number>} locale -> keys without a value */

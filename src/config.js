@@ -62,6 +62,7 @@ export class Config {
         maxKeysPerNamespace: r.integer('MAX_KEYS_PER_NAMESPACE', 20_000, { min: 1 }),
         maxLocalesPerNamespace: r.integer('MAX_LOCALES_PER_NAMESPACE', 50, { min: 1, max: 500 }),
         releaseRetention: r.integer('RELEASE_RETENTION', 100, { min: 1 }),
+        publishRequiresReview: r.boolean('PUBLISH_REQUIRES_REVIEW', false),
       },
     });
   }

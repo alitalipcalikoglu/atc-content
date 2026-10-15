@@ -28,7 +28,7 @@ test('API: probes, info, openapi, auth and roles', async (t) => {
   assert.equal(spec.body, readFileSync(new URL('../openapi.yaml', import.meta.url), 'utf8'));
   const info = json(await app.inject({ url: '/v1/info' }));
   assert.deepEqual([info.service, info.version, info.apiVersion, typeof info.schemaVersion, typeof info.serviceCore], ['atc-content', PACKAGE_VERSION, 'v1', 'number', 'string']);
-  assert.deepEqual(info.capabilities, ['locale-fallback', 'placeholder-check', 'releases', 'bundle-etag', 'import-export']);
+  assert.deepEqual(info.capabilities, ['locale-fallback', 'placeholder-check', 'releases', 'bundle-etag', 'import-export', 'icu-messages', 'review']);
   assert.equal((await app.inject({ url: '/v1/namespaces' })).statusCode, 401);
   assert.equal((await app.inject({ url: '/v1/namespaces', headers: bearer('x'.repeat(40)) })).statusCode, 401);
   assert.equal((await app.inject({ url: '/v1/namespaces', headers: bearer(WRITE_KEY) })).statusCode, 403, 'write-only key cannot read');

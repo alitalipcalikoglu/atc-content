@@ -6,6 +6,8 @@ Scenario-driven walkthroughs of every feature. Requests to `/v1/*` need `Authori
 |---|---|
 | [Namespaces and locales](namespaces-and-locales.md) | Creating `web` and `mobile`, the default locale, fallback chains like `tr-CY -> tr -> en` |
 | [Keys, values and placeholders](keys-and-placeholders.md) | Adding keys, per-locale values, `{name}` placeholder checks, finding missing translations |
+| [Plurals, select and ICU messages](icu-messages.md) | `{count, plural, …}` per locale, select, nested arguments, what `INVALID_MESSAGE` catches |
+| [Translator review](review.md) | Pending, approved, rejected values, four eyes, `PUBLISH_REQUIRES_REVIEW` |
 | [Import and export](import-export.md) | Loading a locale from flat or nested JSON, the report, exporting draft or published strings |
 | [Publishing and rollback](publishing-and-rollback.md) | Draft vs release, what blocks a publish, release history, rolling back |
 | [Bundles in an application](bundles.md) | Fetching fallback-resolved strings, ETag and 304, a small client, public bundles |

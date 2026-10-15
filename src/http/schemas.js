@@ -40,7 +40,19 @@ export class Schemas {
     type: 'object', additionalProperties: false,
     properties: {
       q: { type: 'string', minLength: 1, maxLength: 120 }, missing: Schemas.locale,
+      review: { type: 'string', enum: ['pending', 'approved', 'rejected'] }, reviewLocale: Schemas.locale,
       limit: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|1[0-9][0-9]|200)$' }, cursor: Schemas.key,
+    },
+  };
+  static review = {
+    type: 'object', additionalProperties: false, required: ['items', 'decision'],
+    properties: {
+      decision: { type: 'string', enum: ['approve', 'reject'] },
+      note: { type: 'string', maxLength: 500 },
+      items: {
+        type: 'array', minItems: 1, maxItems: 500,
+        items: { type: 'object', additionalProperties: false, required: ['key', 'locale'], properties: { key: Schemas.key, locale: Schemas.locale, value: { type: 'string', maxLength: 1_000_000 } } },
+      },
     },
   };
   static exportQuery = { type: 'object', additionalProperties: false, properties: { source: { type: 'string', enum: ['draft', 'published'] }, format: { type: 'string', enum: ['flat', 'nested'] } } };

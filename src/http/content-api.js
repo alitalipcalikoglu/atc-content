@@ -75,7 +75,7 @@ export class ContentApi {
     registerInfo(app, {
       service: 'atc-content',
       version: this.version,
-      capabilities: ['locale-fallback', 'placeholder-check', 'releases', 'bundle-etag', 'import-export', ...(config.publicBundles ? ['public-bundles'] : [])],
+      capabilities: ['locale-fallback', 'placeholder-check', 'releases', 'bundle-etag', 'import-export', 'icu-messages', 'review', ...(config.publicBundles ? ['public-bundles'] : [])],
       schemaVersion: this.db.schemaVersion,
     });
     await app.register((api) => this.#registerV1(api), { prefix: '/v1' });
@@ -142,7 +142,8 @@ export class ContentApi {
       const ns = s.namespace(p(request).ns);
       const missing = q.missing ? s.localeOf(ns.name, q.missing) : undefined;
       const limit = q.limit ? Number(q.limit) : 50;
-      const rows = this.content.listKeys(ns.name, { q: q.q, missing, after: q.cursor, limit: limit + 1 });
+      const reviewLocale = q.reviewLocale ? s.localeOf(ns.name, q.reviewLocale) : undefined;
+      const rows = this.content.listKeys(ns.name, { q: q.q, missing, review: q.review, reviewLocale, after: q.cursor, limit: limit + 1 });
       const page = rows.slice(0, limit);
       return { items: page.map((k) => Views.key(k, this.content.translationsOfKey(ns.name, k.key), ns.default_locale)), nextCursor: rows.length > limit ? page.at(-1)?.key ?? null : null };
     });
@@ -175,6 +176,8 @@ export class ContentApi {
       const row = s.publish(p(request).ns, /** @type {any} */ (request.body ?? {}), actor(request));
       return reply.code(201).send({ release: Views.release(row) });
     });
+
+    api.post('/namespaces/:ns/review', { config: { audit: AuditClient.route('atc-content.value.review', nsTarget, (r, b) => ({ decision: /** @type {any} */ (r.body)?.decision, updated: b?.updated, skipped: b?.skipped?.length })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.review } }, async (request) => s.review(p(request).ns, /** @type {any} */ (request.body), actor(request)));
 
     api.post('/namespaces/:ns/rollback', { config: { audit: AuditClient.route('atc-content.release.rollback', nsTarget, (r, b) => ({ release: b.release.number, rollbackOf: b.release.rollbackOf, restoreDraft: /** @type {any} */ (r.body)?.restoreDraft === true })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.rollback } }, async (request, reply) => {
       const row = s.rollback(p(request).ns, /** @type {any} */ (request.body), actor(request));

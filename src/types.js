@@ -18,6 +18,7 @@
  * @property {number} maxKeysPerNamespace
  * @property {number} maxLocalesPerNamespace
  * @property {number} releaseRetention        Releases kept per namespace; older ones are pruned on publish.
+ * @property {boolean} publishRequiresReview  Only approved values may be published.
  */
 
 /**
@@ -79,6 +80,10 @@
  * @property {string} placeholders   Sorted, comma-joined names.
  * @property {string} updated_by
  * @property {number} updated_at
+ * @property {'pending'|'approved'|'rejected'} review
+ * @property {string|null} reviewed_by
+ * @property {number|null} reviewed_at
+ * @property {string|null} review_note
  */
 
 /**

@@ -10,7 +10,7 @@ test('Config: defaults and key roles', () => {
   assert.deepEqual(c.apiKeys.map((k) => [k.id, k.role]), [['console', 'readwrite'], ['web-app', 'read'], ['translator', 'write']]);
   assert.equal(c.publicBundles, false);
   assert.equal(Config.fromEnv(testEnv({ CONTENT_PUBLIC_BUNDLES: 'true' })).publicBundles, true);
-  assert.deepEqual(c.limits, { maxValueLength: 4096, maxKeysPerNamespace: 20000, maxLocalesPerNamespace: 50, releaseRetention: 100 });
+  assert.deepEqual(c.limits, { maxValueLength: 4096, maxKeysPerNamespace: 20000, maxLocalesPerNamespace: 50, releaseRetention: 100, publishRequiresReview: false });
   assert.equal(c.audit, null);
   assert.ok(Object.isFrozen(c) && Object.isFrozen(c.limits));
 });

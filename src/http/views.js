@@ -24,6 +24,7 @@ export class Views {
       mismatched: s.mismatched,
       release: s.latest ? Views.release(s.latest) : null,
       unpublishedChanges: s.unpublishedChanges,
+      review: Object.fromEntries(s.locales.map((l) => [l.locale, s.review[l.locale] ?? { pending: 0, approved: 0, rejected: 0 }])),
       createdBy: n.created_by, createdAt: Views.iso(n.created_at), updatedAt: Views.iso(n.updated_at), draftUpdatedAt: Views.iso(n.draft_updated_at),
     };
   }
@@ -37,6 +38,7 @@ export class Views {
       values: Object.fromEntries(values.map((t) => [t.locale, t.value])),
       mismatched: def ? values.filter((t) => t.locale !== defaultLocale && t.placeholders !== def.placeholders).map((t) => t.locale) : values.map((t) => t.locale),
       updatedBy: Object.fromEntries(values.map((t) => [t.locale, t.updated_by])),
+      review: Object.fromEntries(values.map((t) => [t.locale, { state: t.review, by: t.reviewed_by, at: t.reviewed_at === null ? null : Views.iso(t.reviewed_at), note: t.review_note }])),
       createdAt: Views.iso(k.created_at), updatedAt: Views.iso(Math.max(k.updated_at, ...values.map((t) => t.updated_at))),
     };
   }

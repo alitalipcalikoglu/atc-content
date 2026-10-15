@@ -39,8 +39,10 @@ npm run typecheck
 - **Namespace**: one application's strings. Name `[a-z][a-z0-9-]{0,63}`, one default locale.
 - **Locale**: BCP 47 `language[-Script][-REGION]` (`en`, `tr-CY`, `zh-Hant-TW`, `es-419`), canonicalised on input. Optional `fallback` to another locale of the namespace; every chain ends at the default locale. Cycles and a fallback on the default are rejected.
 - **Key**: `[a-z0-9][a-z0-9._-]{0,127}`, optional description, one value per locale.
-- **Placeholders**: `{name}` (letters, digits, `_`). A value in any locale other than the default must use exactly the default value's placeholder set (`PLACEHOLDER_MISMATCH`) and needs a default value (`DEFAULT_REQUIRED`). Changing the default's placeholders is allowed; drifted values are reported and block publishing until fixed.
-- **Draft and releases**: every edit changes the draft. `publish` snapshots the whole namespace as release N+1 (immutable). `rollback` publishes an earlier release's content as a new release (optionally replacing the draft too). The newest `RELEASE_RETENTION` releases are kept.
+- **Messages**: ICU MessageFormat. Simple `{name}` (letters, digits, `_`), formatted `{n, number}`, `{d, date, short}`, and complex `{count, plural, one {# item} other {# items}}`, `{rank, selectordinal, …}`, `{gender, select, female {…} other {…}}` with nested messages. Values are stored and served as written; clients format them with their ICU library. The service parses them: a complex argument needs `other`, plural and ordinal categories must exist in the value's locale (CLDR: `few` is valid in `pl`, not in `en`), braces must balance (`400 INVALID_MESSAGE`). A `{` that does not start an argument (`{ x`, `{1}`) and `'{quoted}'` text stay literal.
+- **Placeholders**: the argument names of a message, nested ones included. A value in any locale other than the default must use exactly the default value's placeholder set (`PLACEHOLDER_MISMATCH`) and needs a default value (`DEFAULT_REQUIRED`). Changing the default's placeholders is allowed; drifted values are reported and block publishing until fixed.
+- **Review**: every value is `pending`, `approved` or `rejected`. `POST /v1/namespaces/:ns/review` approves or rejects values; whoever wrote a value cannot review it (actors are compared, so console admins named in `X-Actor` count as people), and any later change puts it back to `pending`. With `PUBLISH_REQUIRES_REVIEW=true` only a draft whose every value is approved can be published; otherwise review is informational.
+- **Draft and releases**: every edit changes the draft. `publish` snapshots the whole namespace as release N+1 (immutable). `rollback` publishes an earlier release's content as a new release (optionally replacing the draft too; restored values start as `pending`). The newest `RELEASE_RETENTION` releases are kept.
 - **Bundle**: the latest release for one locale, each key resolved along the locale's chain, as a flat `{ key: string }` map.
 
 ## API
@@ -55,17 +57,18 @@ All `/v1/*` routes and `/metrics` need `Authorization: Bearer <secret>`; bundles
 | POST | `/v1/namespaces` | write | Create with default locale and optional locales |
 | GET / PATCH / DELETE | `/v1/namespaces/:ns` | read / write / write | One namespace; change description or default locale; delete with every release |
 | PUT / DELETE | `/v1/namespaces/:ns/locales/:locale` | write | Add a locale or set its fallback; remove it |
-| GET | `/v1/namespaces/:ns/keys` | read | Keys with values; `q`, `missing=<locale>`, `limit`, `cursor` |
+| GET | `/v1/namespaces/:ns/keys` | read | Keys with values and review state; `q`, `missing=<locale>`, `review=pending\|approved\|rejected` (with `reviewLocale`), `limit`, `cursor` |
 | GET / PUT / DELETE | `/v1/namespaces/:ns/keys/:key` | read / write / write | One key; create or merge values (`null` removes); delete |
 | POST | `/v1/namespaces/:ns/import` | write | Merge flat or nested JSON into one locale; report added/updated/unchanged/invalid |
 | GET | `/v1/namespaces/:ns/export/:locale` | read | One locale's own values; `source=draft\|published`, `format=flat\|nested` |
+| POST | `/v1/namespaces/:ns/review` | write | `{ decision: approve\|reject, note?, items: [{ key, locale, value? }] }` → `{ updated, skipped: [{ key, locale, code, reason }] }` |
 | POST | `/v1/namespaces/:ns/publish` | write | Draft to release N+1; `409 UNPUBLISHABLE` with the problems while values drifted |
 | POST | `/v1/namespaces/:ns/rollback` | write | `{ release, restoreDraft? }`: earlier content as a new release |
 | GET | `/v1/namespaces/:ns/releases`, `/v1/namespaces/:ns/releases/:number` | read | Release history; one release with content |
 | GET | `/v1/bundles/:ns/:locale` | read, or none when public | Published, fallback-resolved strings; `ETag`, `304`, `Cache-Control: public, max-age=60` |
 | GET | `/v1/stats` | read | Totals (namespaces, keys, locales, missing, mismatched, releases, last publish) and one row per namespace |
 
-Errors are `{ "error": { "code", "message", "details"? } }` with stable codes: `NAMESPACE_NOT_FOUND`, `LOCALE_NOT_FOUND`, `KEY_NOT_FOUND`, `RELEASE_NOT_FOUND`, `NOT_PUBLISHED` (404); `INVALID_LOCALE`, `INVALID_FALLBACK`, `INVALID_VALUE`, `DEFAULT_REQUIRED`, `PLACEHOLDER_MISMATCH`, `VALIDATION_FAILED` (400); `NAMESPACE_EXISTS`, `LOCALE_IN_USE`, `NESTED_CONFLICT`, `UNPUBLISHABLE`, `LIMIT_EXCEEDED` (409); `UNAUTHORIZED` (401), `FORBIDDEN` (403), `RATE_LIMITED` (429).
+Errors are `{ "error": { "code", "message", "details"? } }` with stable codes: `NAMESPACE_NOT_FOUND`, `LOCALE_NOT_FOUND`, `KEY_NOT_FOUND`, `RELEASE_NOT_FOUND`, `NOT_PUBLISHED` (404); `INVALID_LOCALE`, `INVALID_FALLBACK`, `INVALID_VALUE`, `INVALID_MESSAGE`, `DEFAULT_REQUIRED`, `PLACEHOLDER_MISMATCH`, `VALIDATION_FAILED` (400); `NAMESPACE_EXISTS`, `LOCALE_IN_USE`, `NESTED_CONFLICT`, `UNPUBLISHABLE`, `LIMIT_EXCEEDED` (409); `UNAUTHORIZED` (401), `FORBIDDEN` (403), `RATE_LIMITED` (429).
 
 ### From an application
 
@@ -76,7 +79,7 @@ curl -s -H "Authorization: Bearer $READ_KEY" http://localhost:3013/v1/bundles/we
 
 Keep the `ETag` and send it as `If-None-Match`; an unchanged release answers `304`. A small caching client is in [examples/bundles.md](examples/bundles.md).
 
-`/v1/info` capabilities: `locale-fallback`, `placeholder-check`, `releases`, `bundle-etag`, `import-export`, and `public-bundles` when `CONTENT_PUBLIC_BUNDLES=true`.
+`/v1/info` capabilities: `locale-fallback`, `placeholder-check`, `releases`, `bundle-etag`, `import-export`, `icu-messages`, `review`, and `public-bundles` when `CONTENT_PUBLIC_BUNDLES=true`.
 
 ## Examples
 
@@ -98,6 +101,7 @@ All configuration is environment variables; see [.env.example](.env.example) for
 | `MAX_VALUE_LENGTH` | `4096` | Characters per value |
 | `MAX_KEYS_PER_NAMESPACE`, `MAX_LOCALES_PER_NAMESPACE` | `20000`, `50` | Size limits |
 | `RELEASE_RETENTION` | `100` | Releases kept per namespace |
+| `PUBLISH_REQUIRES_REVIEW` | `false` | Publishing needs every draft value approved by someone other than its writer |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-*` and `traceparent` from a reverse proxy |
 | `TLS_CERT_PATH`, `TLS_KEY_PATH` | empty | Serve HTTPS directly (both or neither) |
 | `WEBHOOK_OUT_URL`, `WEBHOOK_OUT_API_KEY`, `WEBHOOK_OUT_TIMEOUT_MS` | empty, empty, `5000` | Publish events to atc-webhook-out (URL and key both or neither; a `publish` key) |
@@ -135,12 +139,12 @@ docs/READINESS.md        operational contract
 
 ## Out of scope by design
 
-- ICU MessageFormat (plural, select, number/date formatting). Placeholders are simple `{name}` substitutions; `{count, plural, …}` is stored as plain text and not interpreted.
+- Formatting messages on the server: bundles carry ICU source strings, clients format them. The parser checks structure and plural categories, not number or date skeletons inside a style (`{n, number, ::currency/EUR}` is accepted as written).
 - Rich content (HTML, Markdown, media). Values are plain strings.
 - Automatic locale truncation: `de-CH` does not fall back to `de` unless `de-CH` is configured with `fallback: "de"`.
 - Key rotation without restart (edit `CONTENT_API_KEYS` and restart; keys can be limited to namespaces).
 - Draft change history per value. Releases are the history; `updatedBy` shows the last editor per value.
-- Machine translation and translator workflow states (review, approval).
+- Machine translation, translator assignments and review comments threads (a review has one optional note).
 
 ## Events
 
