@@ -14,6 +14,10 @@ Applications read published, fallback-resolved bundles with a strong `ETag`.
   (`@atc-web/atc-service-core/audit`); the outbound `POST {AUDIT_URL}/v1/events/batch` never sits on
   the request path. While audit is unreachable, events accumulate in an in-memory buffer
   (`MAX_BUFFER = 5_000`, oldest dropped with a warning) and are lost on an ungraceful exit.
+- `atc-webhook-out` (`WEBHOOK_OUT_URL` + `WEBHOOK_OUT_API_KEY`, a publish-role key): optional,
+  both-or-neither. `content.release.published` and `content.release.rolled_back` events are published best effort from a bounded in-memory queue (500
+  events, three retries, an idempotency key each) in the background; the request path never waits
+  on it, and events still queued at a restart are lost (atc-stack `docs/EVENTS.md`).
 
 No other service or external system is called.
 
