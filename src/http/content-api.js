@@ -3,6 +3,7 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import { AuditClient } from '@atc-web/atc-service-core/audit';
 import { createErrorHandler, registerInfo, registerOpenApi, registerProbes, registerRequestContext, requestOptions } from '@atc-web/atc-service-core/fastify';
+import { Idempotency } from '@atc-web/atc-service-core/idempotency';
 import { ContentError } from '../domain/errors.js';
 import { Actor } from './actor.js';
 import { ApiKeyAuth } from './api-key-auth.js';
@@ -70,6 +71,8 @@ export class ContentApi {
       reply.header('x-content-type-options', 'nosniff');
       if (!reply.hasHeader('cache-control')) reply.header('cache-control', 'no-store');
     });
+    // Opt-in per route (config.idempotent): repeats with the same Idempotency-Key replay the first 2xx answer.
+    Idempotency.register(app, { raw: this.db.raw });
     registerProbes(app, () => this.db.ping(), { cacheMs: ContentApi.READY_CACHE_MS });
     registerOpenApi(app, new URL('../../openapi.yaml', import.meta.url));
     registerInfo(app, {
@@ -105,9 +108,9 @@ export class ContentApi {
     const keyTarget = (/** @type {FastifyRequest} */ r) => ({ type: 'key', id: `${p(r).ns}/${p(r).key}` });
 
     // ---- namespaces
-    api.get('/namespaces', read, async (request) => ({ items: this.content.namespaces().filter((n) => !request.apiKey?.scopes || request.apiKey.scopes.includes(n.name)).map((n) => Views.namespace(n, s.summary(n))) }));
+    api.get('/namespaces', read, async (request) => ({ items: this.content.namespaces().filter((n) => !request.apiKey?.scopes || request.apiKey.scopes.includes(n.name)).map((n) => Views.namespace(n, s.summary(n))), nextCursor: null }));
 
-    api.post('/namespaces', { config: { audit: AuditClient.route('atc-content.namespace.create', (_r, b) => ({ type: 'namespace', id: b.namespace.name }), (_r, b) => ({ defaultLocale: b.namespace.defaultLocale, locales: b.namespace.locales.map((/** @type {any} */ l) => l.locale) })) }, ...write, schema: { body: Schemas.createNamespace } }, async (request, reply) => {
+    api.post('/namespaces', { config: { idempotent: true, audit: AuditClient.route('atc-content.namespace.create', (_r, b) => ({ type: 'namespace', id: b.namespace.name }), (_r, b) => ({ defaultLocale: b.namespace.defaultLocale, locales: b.namespace.locales.map((/** @type {any} */ l) => l.locale) })) }, ...write, schema: { body: Schemas.createNamespace } }, async (request, reply) => {
       const row = s.createNamespace(/** @type {any} */ (request.body), actor(request));
       reply.header('location', `/v1/namespaces/${row.name}`);
       return reply.code(201).send({ namespace: nsView(row.name) });
@@ -161,7 +164,7 @@ export class ContentApi {
     });
 
     // ---- import / export
-    api.post('/namespaces/:ns/import', { config: { audit: AuditClient.route('atc-content.translations.import', nsTarget, (_r, b) => ({ locale: b.locale, added: b.added, updated: b.updated, unchanged: b.unchanged, invalid: b.invalidCount })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.importBody } }, async (request) => {
+    api.post('/namespaces/:ns/import', { config: { idempotent: true, audit: AuditClient.route('atc-content.translations.import', nsTarget, (_r, b) => ({ locale: b.locale, added: b.added, updated: b.updated, unchanged: b.unchanged, invalid: b.invalidCount })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.importBody } }, async (request) => {
       const b = /** @type {{ locale: string, strings: Record<string, unknown> }} */ (request.body);
       return s.importLocale(p(request).ns, b.locale, b.strings, actor(request));
     });
@@ -172,25 +175,25 @@ export class ContentApi {
     });
 
     // ---- releases
-    api.post('/namespaces/:ns/publish', { config: { audit: AuditClient.route('atc-content.release.publish', nsTarget, (_r, b) => ({ release: b.release.number, keys: b.release.keys })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.publish } }, async (request, reply) => {
+    api.post('/namespaces/:ns/publish', { config: { idempotent: true, audit: AuditClient.route('atc-content.release.publish', nsTarget, (_r, b) => ({ release: b.release.number, keys: b.release.keys })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.publish } }, async (request, reply) => {
       const row = s.publish(p(request).ns, /** @type {any} */ (request.body ?? {}), actor(request));
       return reply.code(201).send({ release: Views.release(row) });
     });
 
-    api.post('/namespaces/:ns/review', { config: { audit: AuditClient.route('atc-content.value.review', nsTarget, (r, b) => ({ decision: /** @type {any} */ (r.body)?.decision, updated: b?.updated, skipped: b?.skipped?.length })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.review } }, async (request) => s.review(p(request).ns, /** @type {any} */ (request.body), actor(request)));
+    api.post('/namespaces/:ns/review', { config: { idempotent: true, audit: AuditClient.route('atc-content.value.review', nsTarget, (r, b) => ({ decision: /** @type {any} */ (r.body)?.decision, updated: b?.updated, skipped: b?.skipped?.length })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.review } }, async (request) => s.review(p(request).ns, /** @type {any} */ (request.body), actor(request)));
 
-    api.post('/namespaces/:ns/rollback', { config: { audit: AuditClient.route('atc-content.release.rollback', nsTarget, (r, b) => ({ release: b.release.number, rollbackOf: b.release.rollbackOf, restoreDraft: /** @type {any} */ (r.body)?.restoreDraft === true })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.rollback } }, async (request, reply) => {
+    api.post('/namespaces/:ns/rollback', { config: { idempotent: true, audit: AuditClient.route('atc-content.release.rollback', nsTarget, (r, b) => ({ release: b.release.number, rollbackOf: b.release.rollbackOf, restoreDraft: /** @type {any} */ (r.body)?.restoreDraft === true })) }, ...write, schema: { params: Schemas.nsParams, body: Schemas.rollback } }, async (request, reply) => {
       const row = s.rollback(p(request).ns, /** @type {any} */ (request.body), actor(request));
       return reply.code(201).send({ release: Views.release(row) });
     });
 
     api.get('/namespaces/:ns/releases', { ...read, schema: { params: Schemas.nsParams, querystring: Schemas.releasesQuery } }, async (request) => {
-      const q = /** @type {{ limit?: string, before?: string }} */ (request.query);
+      const q = /** @type {{ limit?: string, cursor?: string }} */ (request.query);
       s.namespace(p(request).ns);
       const limit = q.limit ? Number(q.limit) : 20;
-      const rows = this.releases.list(p(request).ns, { limit: limit + 1, before: q.before ? Number(q.before) : undefined });
+      const rows = this.releases.list(p(request).ns, { limit: limit + 1, before: q.cursor ? Number(q.cursor) : undefined });
       const page = rows.slice(0, limit);
-      return { items: page.map(Views.release), nextBefore: rows.length > limit ? String(page.at(-1)?.number) : null };
+      return { items: page.map(Views.release), nextCursor: rows.length > limit ? String(page.at(-1)?.number) : null };
     });
 
     api.get('/namespaces/:ns/releases/:number', { ...read, schema: { params: Schemas.releaseParams } }, async (request) => {

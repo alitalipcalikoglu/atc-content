@@ -36,7 +36,7 @@ Both happen after the default text changes (or the default locale changes). Miss
 ## History
 
 ```bash
-ccurl "$CONTENT/v1/namespaces/web/releases?limit=20"       # newest first, nextBefore for older
+ccurl "$CONTENT/v1/namespaces/web/releases?limit=20"       # newest first; pass nextCursor back as &cursor= for older
 ccurl "$CONTENT/v1/namespaces/web/releases/3"              # one release with its full content
 ```
 

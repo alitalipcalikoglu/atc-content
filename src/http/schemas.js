@@ -56,5 +56,5 @@ export class Schemas {
     },
   };
   static exportQuery = { type: 'object', additionalProperties: false, properties: { source: { type: 'string', enum: ['draft', 'published'] }, format: { type: 'string', enum: ['flat', 'nested'] } } };
-  static releasesQuery = { type: 'object', additionalProperties: false, properties: { limit: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|100)$' }, before: { type: 'string', pattern: '^[0-9]{1,10}$' } } };
+  static releasesQuery = { type: 'object', additionalProperties: false, properties: { limit: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|100)$' }, cursor: { type: 'string', pattern: '^[0-9]{1,10}$' } } };
 }

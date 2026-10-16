@@ -81,6 +81,11 @@ Keep the `ETag` and send it as `If-None-Match`; an unchanged release answers `30
 
 `/v1/info` capabilities: `locale-fallback`, `placeholder-check`, `releases`, `bundle-etag`, `import-export`, `icu-messages`, `review`, and `public-bundles` when `CONTENT_PUBLIC_BUNDLES=true`.
 
+## Conventions
+
+- Lists answer `{ items, nextCursor }`; pass `nextCursor` back as `cursor`. Namespaces are a complete list (`nextCursor: null`); releases page newest first. Namespace names, keys and release numbers are natural keys.
+- Namespace creation, import, publish, review and rollback honour `Idempotency-Key`: a repeat with the same key (per API key and caller — the console's `X-Actor` counts — for 24 h) replays the first 2xx answer with `Idempotent-Replayed: true`; another body is `409 IDEMPOTENCY_MISMATCH`.
+
 ## Examples
 
 Scenario walkthroughs for every feature (requests, responses, pitfalls): [examples/README.md](examples/README.md).

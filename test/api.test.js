@@ -129,8 +129,8 @@ test('API: publish, bundles with fallback, ETag/304, rollback, releases', async 
   assert.equal(json(await app.inject({ method: 'POST', url: '/v1/namespaces/web/rollback', headers: h, payload: { release: 99 } })).error.code, 'RELEASE_NOT_FOUND');
 
   res = await app.inject({ url: '/v1/namespaces/web/releases?limit=2', headers: bearer(READ_KEY) });
-  assert.deepEqual([json(res).items.map((/** @type {any} */ r) => r.number), json(res).nextBefore], [[3, 2], '2']);
-  res = await app.inject({ url: '/v1/namespaces/web/releases?before=2', headers: bearer(READ_KEY) });
+  assert.deepEqual([json(res).items.map((/** @type {any} */ r) => r.number), json(res).nextCursor], [[3, 2], '2']);
+  res = await app.inject({ url: '/v1/namespaces/web/releases?cursor=2', headers: bearer(READ_KEY) });
   assert.deepEqual(json(res).items.map((/** @type {any} */ r) => r.number), [1]);
   res = await app.inject({ url: '/v1/namespaces/web/releases/2', headers: bearer(READ_KEY) });
   assert.equal(json(res).release.content.keys['nav.home'].values.tr, 'Anasayfa');

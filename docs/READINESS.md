@@ -70,7 +70,10 @@ backoff (500 ms doubling, capped at 30 s); 4xx other than 429 drops the batch; e
 stay buffered for the next flush. Nothing in the request path retries.
 
 ## Idempotency
-- `POST /v1/namespaces` is not idempotent (`409 NAMESPACE_EXISTS` on repeat).
+- `POST /v1/namespaces`, `.../import`, `.../publish`, `.../review` and `.../rollback` honour
+  `Idempotency-Key` (core `Idempotency`, 24 h, per API key and caller): a repeat replays the first
+  2xx answer instead of creating a second release. Without the header a repeated namespace create
+  is `409 NAMESPACE_EXISTS` and a repeated publish creates another release.
 - `PUT .../locales/:locale` and `PUT .../keys/:key` are idempotent; a repeat that changes nothing
   leaves the draft version untouched (`unpublishedChanges` stays false).
 - `POST .../import` is idempotent in result: a repeat reports everything `unchanged`.
